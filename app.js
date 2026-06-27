@@ -1037,8 +1037,9 @@
   }
 
   /* read-only SVG markup (client view + PDF) */
+  function defaultItemResolve(it){ var m=PLAN_ITEMS[it.type]; return it.productId?(m.cat==='outdoor'?getOutdoor(it.productId):getProduct(it.productId)):null; }
   function planSVGString(opt){
-    opt=opt||{}; var P=state.plan;
+    opt=opt||{}; var P=opt.plan||state.plan; var resolveItem=opt.resolveItem||defaultItemResolve;
     var s='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+P.wcm+' '+P.hcm+'" style="display:block;width:100%;height:auto;background:#fbfdfd" font-family="Inter,system-ui,sans-serif">';
     s+='<defs><pattern id="cvgrid" width="'+P.grid+'" height="'+P.grid+'" patternUnits="userSpaceOnUse"><path d="M '+P.grid+' 0 L 0 0 0 '+P.grid+'" fill="none" stroke="#e8eff0" stroke-width="1"/></pattern></defs>';
     s+='<rect x="0" y="0" width="'+P.wcm+'" height="'+P.hcm+'" fill="url(#cvgrid)"/>';
@@ -1049,7 +1050,7 @@
       s+='<text x="'+(r.x+r.w-8)+'" y="'+(r.y+r.h-8)+'" text-anchor="end" font-size="13" fill="#9fb6bd">'+((r.w/100).toFixed(1).replace('.',',')+'×'+(r.h/100).toFixed(1).replace('.',',')+' m')+'</text>';
     });
     P.items.forEach(function(it){
-      var m=PLAN_ITEMS[it.type]; var prod=it.productId?(m.cat==='outdoor'?getOutdoor(it.productId):getProduct(it.productId)):null; var cx=m.w/2, cy=m.h/2;
+      var m=PLAN_ITEMS[it.type]; var prod=resolveItem(it); var cx=m.w/2, cy=m.h/2;
       s+='<g transform="translate('+it.x+','+it.y+') rotate('+(it.rot||0)+' '+cx+' '+cy+')">';
       s+='<rect x="0" y="0" width="'+m.w+'" height="'+m.h+'" rx="7" fill="'+m.fill+'" stroke="'+m.stroke+'" stroke-width="2"/>';
       s+='<text x="'+cx+'" y="'+(cy-(prod?6:0))+'" text-anchor="middle" font-size="12" font-weight="700" fill="#0f1b24">'+escapeHtml(m.label)+'</text>';
@@ -1072,7 +1073,8 @@
     var back=el('button',{class:'btn subtle'},['← Retour à l\u2019édition']); back.addEventListener('click',function(){ state.ui.clientView=false; render(); });
     var tg=el('button',{class:'btn subtle'},[state.ui.clientPrices?'Masquer les prix':'Afficher les prix']); tg.addEventListener('click',function(){ state.ui.clientPrices=!state.ui.clientPrices; save(); render(); });
     var pr=el('button',{class:'btn primary'},['🖨 Imprimer le devis + plan']); pr.addEventListener('click',function(){ buildPrint(); window.print(); });
-    bar.appendChild(back); bar.appendChild(tg); bar.appendChild(pr); box.appendChild(bar);
+    var sh=el('button',{class:'btn primary'},['📤 Partager au client (lien + QR)']); sh.addEventListener('click', openShareModal);
+    bar.appendChild(back); bar.appendChild(tg); bar.appendChild(pr); bar.appendChild(sh); box.appendChild(bar);
 
     var cv=el('div',{class:'cv'});
     var head=el('div',{class:'cv-head'});
@@ -1104,6 +1106,158 @@
       }
     }
     body.appendChild(el('div',{class:'cv-note'},['Climatisation réversible (pompe à chaleur air-air). TVA réduite à 6 % sur fourniture et pose appliquée. Estimation sous réserve de visite technique. '+(co.footer||'')]));
+    cv.appendChild(body); box.appendChild(cv);
+    return box;
+  }
+
+  /* ============================================================
+     PARTAGE : proposition autonome (lien #hash + QR), sans backend
+     ============================================================ */
+  var SHARE_QR_LIMIT=1800; // au-delà, un QR n'est plus fiable à scanner depuis un écran
+  function r0(v){ return Math.round(+v||0); }
+  function sharedItemResolve(it){ return it.b? {brand:it.b, kw:it.k} : null; }
+  function sharedPlanObj(pl){ return { wcm:pl.w, hcm:pl.h, grid:pl.g, rooms:pl.rooms||[], items:pl.items||[] }; }
+
+  // Instantané résolu et compact : seulement ce qui s'affiche, montants figés, sans photos ni catalogue.
+  function buildShareSnapshot(){
+    var co=state.company, q=state.quote, t=computeTotals(), fin=computeFinance(), roi=computeROI(), P=state.plan;
+    return {
+      v:1,
+      co:{ n:co.name||'', p:co.phone||'', e:co.email||'', f:co.footer||'' },
+      cl:{ n:q.client.name||'', a:q.client.addr||'' },
+      d: q.date || new Date().toISOString().slice(0,10),
+      pr: !!state.ui.clientPrices,
+      vat: state.settings.vat,
+      t:{ tvac:r0(t.tvac), vat:r0(t.vat) },
+      f:{ ac:r0(fin.acompte), re:r0(fin.reste), pe:!!(fin.prime.eligible&&fin.prime.amount>0), pa:r0(fin.prime.amount) },
+      r: (roi&&roi.annual>0)? { a:r0(roi.annual), p:(roi.payback!=null? Math.round(roi.payback*10)/10 : null) } : null,
+      lg: countItems(),
+      pl:{ w:P.wcm, h:P.hcm, g:P.grid,
+        rooms: P.rooms.map(function(rm){ return { x:rm.x, y:rm.y, w:rm.w, h:rm.h, name:rm.name }; }),
+        items: P.items.map(function(it){ var prod=defaultItemResolve(it); return { type:it.type, x:it.x, y:it.y, rot:it.rot||0, b:prod?(prod.brand||''):'', k:prod?(+prod.kw||0):0 }; })
+      }
+    };
+  }
+  function shareURL(snap){
+    var payload=LZString.compressToEncodedURIComponent(JSON.stringify(snap));
+    return location.href.replace(/#.*$/,'') + '#p=' + payload;
+  }
+
+  function openShareModal(){
+    if(typeof LZString==='undefined'){ alert('Le partage nécessite une connexion internet (librairie de compression non chargée). Reconnecte-toi puis recharge la page.'); return; }
+    var snap, url;
+    try{ snap=buildShareSnapshot(); url=shareURL(snap); }
+    catch(e){ alert('Impossible de générer le lien : '+(e&&e.message||e)); return; }
+
+    var back=el('div',{class:'share-modal', id:'shareModal'});
+    var panel=el('div',{class:'share-panel'});
+    panel.appendChild(el('div',{class:'eyebrow'},['Proposition']));
+    panel.appendChild(el('h2',{class:'section-title',style:'margin:2px 0 4px'},['Partager au client']));
+    panel.appendChild(el('p',{class:'section-sub',style:'margin-bottom:12px'},['Le client scanne le QR ou ouvre le lien : il voit l’offre, le plan et la 3D en lecture seule, même hors de votre présence. '+(snap.pr?'Prix affichés.':'Prix masqués.')]));
+
+    var qrHost=el('div',{class:'share-qr'});
+    if(url.length<=SHARE_QR_LIMIT){
+      try{ var qr=qrcode(0,'M'); qr.addData(url); qr.make(); qrHost.innerHTML=qr.createImgTag(6,12); }
+      catch(e){ qrHost.appendChild(el('div',{class:'share-qr-msg'},['QR indisponible (proposition trop volumineuse). Utilise « Copier le lien » ou « Partager » ci-dessous.'])); }
+    } else {
+      qrHost.appendChild(el('div',{class:'share-qr-msg'},['Proposition trop volumineuse pour un QR fiable. Le lien reste valable : utilise « Copier le lien » ou « Partager ».']));
+    }
+    panel.appendChild(qrHost);
+
+    var linkIn=el('input',{class:'share-link', type:'text', readonly:'readonly'}); linkIn.value=url;
+    linkIn.addEventListener('focus',function(){ linkIn.select(); });
+    panel.appendChild(linkIn);
+
+    var status=el('div',{class:'share-status'},['']);
+    function flash(msg){ status.textContent=msg; }
+
+    var row=el('div',{class:'share-actions'});
+    var copyBtn=el('button',{class:'btn primary'},['📋 Copier le lien']);
+    copyBtn.addEventListener('click',function(){
+      function ok(){ flash('Lien copié dans le presse-papiers.'); }
+      function fb(){ try{ linkIn.focus(); linkIn.select(); document.execCommand('copy'); ok(); }catch(e){ flash('Copie impossible — sélectionne le lien manuellement.'); } }
+      if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(url).then(ok, fb); } else { fb(); }
+    });
+    row.appendChild(copyBtn);
+    if(navigator.share){
+      var shareBtn=el('button',{class:'btn subtle'},['🔗 Partager…']);
+      shareBtn.addEventListener('click',function(){ navigator.share({ title:'Votre proposition climatisation', text:'Votre proposition de '+(snap.co.n||'votre installateur'), url:url }).then(function(){ flash('Partagé.'); }, function(){}); });
+      row.appendChild(shareBtn);
+    }
+    var closeBtn=el('button',{class:'btn ghost'},['Fermer']);
+    closeBtn.addEventListener('click',closeShareModal);
+    row.appendChild(closeBtn);
+    panel.appendChild(row);
+    panel.appendChild(status);
+    panel.appendChild(el('div',{class:'share-foot'},['Lien autonome : tout est encodé dans l’adresse (après le #). Aucune donnée n’est envoyée à un serveur. '+url.length+' caractères.']));
+
+    back.appendChild(panel);
+    back.addEventListener('click',function(e){ if(e.target===back) closeShareModal(); });
+    document.body.appendChild(back);
+  }
+  function closeShareModal(){ var m=document.getElementById('shareModal'); if(m&&m.parentNode) m.parentNode.removeChild(m); }
+
+  // Décodage à l'ouverture d'un lien partagé.
+  function decodeShared(){
+    try{
+      var h=location.hash||'';
+      if(h.indexOf('#p=')!==0) return null;
+      if(typeof LZString==='undefined') return null;
+      var raw=LZString.decompressFromEncodedURIComponent(h.slice(3));
+      if(!raw) return null;
+      var snap=JSON.parse(raw);
+      return (snap && snap.v===1) ? snap : null;
+    }catch(e){ return null; }
+  }
+  function tryRenderShared(){
+    var snap=decodeShared(); if(!snap) return false;
+    state.ui.shared=true;
+    document.body.classList.add('shared-mode');
+    if(threeCleanup){ try{threeCleanup();}catch(e){} threeCleanup=null; }
+    viewEl.innerHTML=''; viewEl.appendChild(renderSharedProposal(snap));
+    return true;
+  }
+
+  function renderSharedProposal(snap){
+    var box=el('div');
+    box.appendChild(el('div',{class:'banner info',style:'margin-bottom:14px'},['Proposition établie par '+(snap.co.n||'votre installateur')+' — document en lecture seule.']));
+    var cv=el('div',{class:'cv'});
+    var head=el('div',{class:'cv-head'});
+    var coInfo=el('div');
+    coInfo.appendChild(el('div',{class:'co-name'},[snap.co.n||'Votre société']));
+    coInfo.appendChild(el('div',{style:'font-size:12.5px;color:#bcd0d6;margin-top:4px'},[(snap.co.p||'')+(snap.co.e?'  ·  '+snap.co.e:'')]));
+    var dateStr = snap.d? new Date(snap.d+'T00:00').toLocaleDateString('fr-BE') : '';
+    var meta=el('div',{class:'meta'}); meta.innerHTML='<b style="color:#fff">Votre projet climatisation</b><br>'+(snap.cl.n?escapeHtml(snap.cl.n)+'<br>':'')+(snap.cl.a?escapeHtml(snap.cl.a)+'<br>':'')+dateStr;
+    head.appendChild(coInfo); head.appendChild(meta); cv.appendChild(head);
+
+    var body=el('div',{class:'cv-body'});
+    var hasPlan = snap.pl && ((snap.pl.rooms&&snap.pl.rooms.length)||(snap.pl.items&&snap.pl.items.length));
+    if(hasPlan){ var pw=el('div',{class:'cv-plan'}); pw.innerHTML=planSVGString({plan:sharedPlanObj(snap.pl), resolveItem:sharedItemResolve}); body.appendChild(pw); }
+    if(snap.lg && snap.lg.length){ var leg=el('div',{class:'cv-legend'}); snap.lg.forEach(function(cc){ leg.appendChild(el('div',{class:'cv-leg'},[ el('span',{class:'sw',style:'background:'+cc.stroke}), document.createTextNode(cc.text) ])); }); body.appendChild(leg); }
+    if(hasPlan && typeof THREE!=='undefined'){
+      var wrap=el('div',{style:'position:relative; margin-top:14px; border:1px solid var(--line); border-radius:var(--radius); overflow:hidden; background:#0f1b24; height:52vh; touch-action:none'});
+      body.appendChild(wrap);
+      body.appendChild(el('div',{class:'plan-hint'},['Maquette 3D — glisse pour pivoter, molette ou pince pour zoomer.']));
+      setTimeout(function(){ try{ buildThreeScene(wrap, sharedPlanObj(snap.pl), sharedItemResolve); }catch(e){ wrap.innerHTML='<div style="color:#eef4f5;padding:24px;font-size:13px">3D indisponible sur cet appareil — voir le plan ci-dessus.</div>'; } },0);
+    }
+    if(snap.pr){
+      var offer=el('div',{class:'cv-offer'});
+      var hasPrime = snap.f.pe && snap.f.pa>0;
+      var headlineLabel = hasPrime? 'Reste à charge estimé après prime' : 'Investissement total TVAC';
+      var headlineVal = hasPrime? snap.f.re : snap.t.tvac;
+      offer.appendChild(el('div',null,[ el('div',{class:'total-label'},[headlineLabel]), el('div',{class:'big num'},[euro.format(headlineVal)]) ]));
+      var rh=el('div',{style:'font-size:12.5px;color:var(--muted);text-align:right'});
+      var rhHtml='Total '+euro.format(snap.t.tvac)+' TVAC (TVA '+snap.vat+' %)';
+      if(hasPrime) rhHtml+='<br>Prime Région estimée : −'+euro.format(snap.f.pa);
+      rhHtml+='<br>Acompte à la commande : '+euro.format(snap.f.ac);
+      rh.innerHTML=rhHtml; offer.appendChild(rh); body.appendChild(offer);
+      if(snap.r && snap.r.a>0){
+        var roiBox=el('div',{style:'margin-top:14px; background:var(--good-wash); border:1px solid #c7e6d3; border-radius:12px; padding:14px 16px; font-size:13px; color:#23603f'});
+        roiBox.innerHTML='💡 <b>Économies estimées</b> : environ '+euro.format(snap.r.a)+' / an'+(snap.r.p!=null?', soit un retour sur le reste à charge en ~'+String(snap.r.p).replace('.',',')+' ans.':'.')+' <span style="color:var(--muted)">Estimation indicative.</span>';
+        body.appendChild(roiBox);
+      }
+    }
+    body.appendChild(el('div',{class:'cv-note'},['Climatisation réversible (pompe à chaleur air-air). TVA réduite à 6 % appliquée. Estimation sous réserve de visite technique. '+(snap.co.f||'')]));
     cv.appendChild(body); box.appendChild(cv);
     return box;
   }
@@ -1224,8 +1378,8 @@
     return sp;
   }
 
-  function buildThreeScene(container){
-    var P=state.plan, W=container.clientWidth||800, H=container.clientHeight||500;
+  function buildThreeScene(container, planOverride, resolveOverride){
+    var P=planOverride||state.plan, resolveItem=resolveOverride||defaultItemResolve, W=container.clientWidth||800, H=container.clientHeight||500;
     var cx=P.wcm/200, cz=P.hcm/200, wallH=2.4;
     var renderer=new THREE.WebGLRenderer({antialias:true});
     renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
@@ -1264,7 +1418,7 @@
       else { dims=[0.84,0.56,0.34]; y=0.32; }
       var mesh=new THREE.Mesh(new THREE.BoxGeometry(dims[0],dims[1],dims[2]), new THREE.MeshLambertMaterial({color:color}));
       mesh.position.set(icx,y,icz); mesh.rotation.y=-(it.rot||0)*Math.PI/180; scene.add(mesh);
-      var prod=it.productId? (meta.cat==='outdoor'?getOutdoor(it.productId):getProduct(it.productId)) : null;
+      var prod=resolveItem(it);
       var lab=makeLabelSprite(prod? (prod.brand+' '+fmtKw(prod.kw)) : meta.label); if(lab){ lab.position.set(icx, y+0.34, icz); scene.add(lab); }
     });
 
@@ -1543,8 +1697,10 @@
 
   /* ---------------- init ---------------- */
   load();
-  state.ui = Object.assign({tab:'devis',adminSection:'societe',clientPrices:true,clientView:false,planSel:null}, state.ui||{});
-  state.quote.rooms.forEach(function(r){ if(!r.productId) autoSelectProduct(r); });
-  render();
+  state.ui = Object.assign({tab:'devis',adminSection:'societe',clientPrices:true,clientView:false,planSel:null,shared:false}, state.ui||{});
+  if(!tryRenderShared()){
+    state.quote.rooms.forEach(function(r){ if(!r.productId) autoSelectProduct(r); });
+    render();
+  }
   if(storageOK===false) setSaveState(false,'Session uniquement');
 })();
