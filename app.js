@@ -324,11 +324,24 @@
 
   function fmtKw(k){ return (Math.round((+k||0)*10)/10).toString().replace('.',',')+' kW'; }
 
+  function indoorMurals(){ return state.catalog.filter(function(p){return p.type==='mural';}).sort(function(a,b){return (+a.kw||0)-(+b.kw||0);}); }
+  function suggestIndoor(reco){
+    var murals=indoorMurals();
+    return murals.filter(function(p){return (+p.kw||0)>=reco-0.05;})[0] || murals[0] || state.catalog[0] || null;
+  }
   function autoSelectProduct(r){
-    var reco=computeRoom(r).reco;
-    var murals=state.catalog.filter(function(p){return p.type==='mural';}).sort(function(a,b){return a.kw-b.kw;});
-    var pick=murals.filter(function(p){return p.kw>=reco-0.05;})[0]||murals[0]||state.catalog[0];
+    var pick=suggestIndoor(computeRoom(r).reco);
     r.productId = pick? pick.id : null;
+  }
+  // Suggestion AR : même moteur de charge (computeRoom → reco) que le devis ; on prend la plus petite
+  // unité ≥ besoin. Si rien d'assez puissant : la plus grande, avec enough=false (multi-split hors périmètre).
+  function suggestIndoorForAR(reco){
+    var murals=indoorMurals();
+    if(!murals.length) murals=state.catalog.slice().sort(function(a,b){return (+a.kw||0)-(+b.kw||0);});
+    if(!murals.length) return {product:null, enough:false};
+    var fit=murals.filter(function(p){return (+p.kw||0)>=reco-0.05;})[0];
+    if(fit) return {product:fit, enough:true};
+    return {product:murals[murals.length-1], enough:false};
   }
 
   function buildRoomCard(r){
@@ -903,6 +916,7 @@
     t.appendChild(el('span',{class:'sep'}));
     var arB=el('button',{class:'planbtn'},['📐 Mesurer en AR']); arB.addEventListener('click', startARMeasure); t.appendChild(arB);
     var arViz=el('button',{class:'planbtn'},['🛋 Voir la clim sur le mur (AR)']); arViz.addEventListener('click', startARPlace); t.appendChild(arViz);
+    var arScan=el('button',{class:'planbtn'},['✨ Scanner & équiper en AR']); arScan.addEventListener('click', startARScanEquip); t.appendChild(arScan);
     var d3=el('button',{class:'btn subtle sm'},['🧊 Voir en 3D']); d3.addEventListener('click',function(){ state.ui.tab='3d'; render(); }); t.appendChild(d3);
     var cvB=el('button',{class:'btn primary sm'},['👁 Vue client']); cvB.addEventListener('click',function(){ state.ui.clientView=true; render(); }); t.appendChild(cvB);
     return t;
@@ -1459,6 +1473,11 @@
     var msg=arSupportMessage(); if(msg){ alert(msg); return; }
     launchAR();
   }
+  // Flux intégré : mesure → dimensionnement (computeRoom) → suggestion modèle → pose de l'unité.
+  function startARScanEquip(){
+    var msg=arSupportMessage(); if(msg){ alert(msg); return; }
+    launchAR({ title:'Scanner & équiper', onMeasured:arScanEquipMeasured });
+  }
   function buildAROverlay(){
     var o=el('div',{class:'ar-overlay', id:'arOverlay'});
     o.innerHTML =
@@ -1469,9 +1488,11 @@
     return o;
   }
 
-  function launchAR(){
+  function launchAR(opts){
+    opts=opts||{};
     var overlay=document.getElementById('arOverlay');
     if(!overlay){ overlay=buildAROverlay(); document.body.appendChild(overlay); }
+    var topB=overlay.querySelector('.ar-top b'); if(topB) topB.textContent=opts.title||'Mesure de la pièce';
     var stats=overlay.querySelector('#arStats');
     overlay.classList.add('on');
 
@@ -1524,7 +1545,8 @@
       var w=Math.max.apply(null,xs)-Math.min.apply(null,xs);
       var d=Math.max.apply(null,zs)-Math.min.apply(null,zs);
       var area=polyArea(points);
-      pendingAfter=function(){ createRoomFromMeasure(w,d,area); };
+      var onMeasured = opts.onMeasured || function(w,d,area){ createRoomFromMeasure(w,d,area); };
+      pendingAfter=function(){ onMeasured(w,d,area); };
       try{ if(session) session.end(); }catch(e){ cleanup(); if(pendingAfter) pendingAfter(); }
     }
 
@@ -1568,26 +1590,76 @@
     }
   }
 
-  function createRoomFromMeasure(wMeters, dMeters, areaM2){
+  function addRoomGeometryFromMeasure(wMeters, dMeters, areaM2){
     var wcm=Math.max(50, Math.round(wMeters*100)), hcm=Math.max(50, Math.round(dMeters*100));
     var x=40, y=40; state.plan.rooms.forEach(function(r){ y=Math.max(y, r.y+r.h+40); });
     var room={ id:UID(), x:snap(x), y:snap(y), w:snap(wcm), h:snap(hcm), name:'Pièce AR ('+areaM2.toFixed(1).replace('.',',')+' m²)' };
     if(room.x+room.w > state.plan.wcm) state.plan.wcm=Math.ceil((room.x+room.w+40)/50)*50;
     if(room.y+room.h > state.plan.hcm) state.plan.hcm=Math.ceil((room.y+room.h+40)/50)*50;
     state.plan.rooms.push(room);
+    return room;
+  }
+  function createRoomFromMeasure(wMeters, dMeters, areaM2){
+    var room=addRoomGeometryFromMeasure(wMeters, dMeters, areaM2);
     state.ui.planSel={kind:'room', id:room.id}; state.ui.tab='plan'; save(); render();
     setTimeout(function(){ alert('Pièce mesurée ajoutée au plan : '+wMeters.toFixed(2).replace('.',',')+' × '+dMeters.toFixed(2).replace('.',',')+' m, surface ≈ '+areaM2.toFixed(1).replace('.',',')+' m².\n\nLa pièce est approximée en rectangle — ajuste-la si elle est en L. Reporte la surface dans le devis pour le dimensionnement.'); },250);
   }
+
+  // Fin de la phase mesure du flux « Scanner & équiper » : dimensionne, suggère un modèle,
+  // ajoute pièce + unité au plan, puis propose de poser l'unité sur le mur en AR.
+  function arScanEquipMeasured(wMeters, dMeters, areaM2){
+    var tmp=newRoom('AR'); tmp.surface=areaM2;        // mêmes hypothèses par défaut que le devis
+    var rc=computeRoom(tmp);                            // un seul moteur de charge
+    var sug=suggestIndoorForAR(rc.reco);
+    var room=addRoomGeometryFromMeasure(wMeters, dMeters, areaM2);
+    var type=(sug.product && PLAN_ITEMS[sug.product.type]) ? sug.product.type : 'mural';
+    var mm=PLAN_ITEMS[type];
+    var ix=clamp(snap(room.x+room.w/2-mm.w/2),0,maxX({type:type},'item'));
+    var iy=clamp(snap(room.y+room.h/2-mm.h/2),0,maxY({type:type},'item'));
+    state.plan.items.push({ id:UID(), type:type, x:ix, y:iy, rot:0, productId: sug.product?sug.product.id:null });
+    state.ui.planSel={kind:'room', id:room.id}; state.ui.tab='plan'; save(); render();
+    showARScanResult(areaM2, rc, sug, type);
+  }
+  function showARScanResult(areaM2, rc, sug, type){
+    var modelTxt = sug.product ? (sug.product.brand+' '+sug.product.model+' — '+fmtKw(sug.product.kw)) : 'aucun modèle au catalogue';
+    var back=el('div',{class:'share-modal', id:'arResultModal'});
+    var panel=el('div',{class:'share-panel'});
+    panel.appendChild(el('div',{class:'eyebrow'},['Scanner & équiper']));
+    panel.appendChild(el('h2',{class:'section-title',style:'margin:2px 0 8px'},['Pièce scannée']));
+    panel.appendChild(el('div',{style:'font-size:15px;font-weight:700;color:var(--ink);margin-bottom:6px'},
+      ['≈ '+areaM2.toFixed(1).replace('.',',')+' m² → ~'+rc.kW.toFixed(1).replace('.',',')+' kW → '+modelTxt]));
+    if(sug.product && !sug.enough) panel.appendChild(el('p',{class:'section-sub',style:'color:#8a5a00'},['⚠ Aucun modèle assez puissant au catalogue : le plus grand est proposé. Un multi-split ou une 2ᵉ unité peut être nécessaire (hors périmètre de l’estimation).']));
+    if(!sug.product) panel.appendChild(el('p',{class:'section-sub'},['Catalogue vide : aucune unité à suggérer. La pièce a été ajoutée au plan.']));
+    panel.appendChild(el('p',{class:'section-sub',style:'margin:8px 0 4px'},['La pièce et l’unité ont été ajoutées au plan et reportées dans ton chiffrage.']));
+    var row=el('div',{class:'share-actions'});
+    if(typeof THREE!=='undefined' && arSupportMessage()===null){
+      var poseBtn=el('button',{class:'btn primary'},['🛋 Poser l’unité suggérée']);
+      poseBtn.addEventListener('click',function(){
+        closeARScanResult();
+        launchARPlace({ label: sug.product?(sug.product.brand+' '+sug.product.model):'Unité', kw: sug.product?(+sug.product.kw||0):null, type:type });
+      });
+      row.appendChild(poseBtn);
+    }
+    var laterBtn=el('button',{class:'btn ghost'},['Plus tard']); laterBtn.addEventListener('click', closeARScanResult);
+    row.appendChild(laterBtn);
+    panel.appendChild(row);
+    back.appendChild(panel);
+    back.addEventListener('click',function(e){ if(e.target===back) closeARScanResult(); });
+    document.body.appendChild(back);
+  }
+  function closeARScanResult(){ var m=document.getElementById('arResultModal'); if(m&&m.parentNode) m.parentNode.removeChild(m); }
 
   /* ---------------- AR : poser la clim sur le mur ---------------- */
   function startARPlace(){
     var msg=arSupportMessage(); if(msg){ alert(msg); return; }
     launchARPlace();
   }
-  function buildARPlaceOverlay(){
+  function buildARPlaceOverlay(opts){
+    opts=opts||{};
+    var modelLine = opts.label ? ('<span class="ar-model">Modèle : '+escapeHtml(opts.label)+(opts.kw?(' · '+fmtKw(opts.kw)):'')+'</span><br>') : '';
     var o=el('div',{class:'ar-overlay', id:'arPlaceOverlay'});
     o.innerHTML =
-      '<div class="ar-top"><b>Voir la clim sur le mur</b><br><span>Vise un mur, balaie-le lentement pour qu\u2019il soit détecté, puis tape l\u2019écran pour poser l\u2019unité à l\u2019échelle réelle. Recule pour la voir en entier.</span></div>'+
+      '<div class="ar-top"><b>Voir la clim sur le mur</b><br>'+modelLine+'<span>Vise un mur, balaie-le lentement pour qu\u2019il soit détecté, puis tape l\u2019écran pour poser l\u2019unité à l\u2019échelle réelle. Recule pour la voir en entier.</span></div>'+
       '<div class="ar-stats" id="arPlaceStats">Recherche d\u2019un mur…</div>'+
       '<div class="ar-cross"></div>'+
       '<div class="ar-bottom"><button class="ar-btn ghost" id="arpUndo">↶ Retirer</button><button class="ar-btn ghost" id="arpClear">Tout effacer</button><button class="ar-btn danger" id="arpQuit">✕ Quitter</button></div>';
@@ -1604,9 +1676,10 @@
     led.position.set(0.36,-0.03,0.207); g.add(led);
     return g;
   }
-  function launchARPlace(){
-    var overlay=document.getElementById('arPlaceOverlay');
-    if(!overlay){ overlay=buildARPlaceOverlay(); document.body.appendChild(overlay); }
+  function launchARPlace(opts){
+    opts=opts||{};
+    var existing=document.getElementById('arPlaceOverlay'); if(existing && existing.parentNode) existing.parentNode.removeChild(existing);
+    var overlay=buildARPlaceOverlay(opts); document.body.appendChild(overlay);
     var stats=overlay.querySelector('#arPlaceStats');
     overlay.classList.add('on');
 

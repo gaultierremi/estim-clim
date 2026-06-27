@@ -216,6 +216,7 @@
   .ar-overlay.on{ display:block }
   .ar-top{ position:absolute; top:0; left:0; right:0; padding:16px 18px; background:linear-gradient(180deg,rgba(15,27,36,.88),transparent); color:#fff; pointer-events:none }
   .ar-top b{ font-size:15px } .ar-top span{ font-size:12.5px; opacity:.88; line-height:1.4 }
+  .ar-top .ar-model{ font-size:13px; font-weight:700; opacity:1; color:#bdeef2 }
   .ar-stats{ position:absolute; top:78px; left:50%; transform:translateX(-50%); background:rgba(15,27,36,.82); color:#fff; padding:9px 16px; border-radius:999px; font-size:13px; font-variant-numeric:tabular-nums; pointer-events:none; white-space:nowrap; max-width:92vw; overflow:hidden; text-overflow:ellipsis }
   .ar-cross{ position:absolute; top:50%; left:50%; width:18px; height:18px; margin:-9px 0 0 -9px; pointer-events:none }
   .ar-cross::before,.ar-cross::after{ content:""; position:absolute; background:rgba(255,255,255,.9); box-shadow:0 0 2px rgba(0,0,0,.6) }
