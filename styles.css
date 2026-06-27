@@ -221,6 +221,10 @@
   .ar-cross{ position:absolute; top:50%; left:50%; width:18px; height:18px; margin:-9px 0 0 -9px; pointer-events:none }
   .ar-cross::before,.ar-cross::after{ content:""; position:absolute; background:rgba(255,255,255,.9); box-shadow:0 0 2px rgba(0,0,0,.6) }
   .ar-cross::before{ left:8px; top:0; width:2px; height:18px } .ar-cross::after{ top:8px; left:0; height:2px; width:18px }
+  .ar-seg{ position:absolute; top:96px; left:50%; transform:translateX(-50%); display:flex; gap:3px; background:rgba(15,27,36,.78); padding:4px; border-radius:999px; pointer-events:auto; max-width:94vw; flex-wrap:nowrap }
+  .ar-seg-btn{ font:inherit; font-size:12.5px; font-weight:700; color:#cfe6ea; background:transparent; border:none; border-radius:999px; padding:9px 13px; cursor:pointer; white-space:nowrap }
+  .ar-seg-btn.on{ background:#0e9aa8; color:#04282b }
+  #arPlaceOverlay .ar-stats{ top:148px }
   .ar-bottom{ position:absolute; bottom:0; left:0; right:0; padding:18px 16px calc(18px + env(safe-area-inset-bottom)); display:flex; gap:10px; justify-content:center; pointer-events:auto }
   .ar-btn{ font:inherit; font-weight:700; font-size:14px; border:none; border-radius:13px; padding:14px 18px; cursor:pointer }
   .ar-btn.primary{ background:#0e9aa8; color:#04282b } .ar-btn.ghost{ background:rgba(255,255,255,.92); color:#0f1b24 } .ar-btn.danger{ background:#bf4631; color:#fff }

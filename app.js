@@ -1654,26 +1654,50 @@
     var msg=arSupportMessage(); if(msg){ alert(msg); return; }
     launchARPlace();
   }
+  var AR_PLACE_TYPES = [['mural','Mural'],['cassette','Cassette'],['console','Console'],['outdoor','Groupe ext.']];
+  var AR_TARGET_HINT = { mural:'Vise un mur', cassette:'Vise le plafond', console:'Vise le bas du mur ou le sol', outdoor:'Vise le sol' };
   function buildARPlaceOverlay(opts){
     opts=opts||{};
     var modelLine = opts.label ? ('<span class="ar-model">Modèle : '+escapeHtml(opts.label)+(opts.kw?(' · '+fmtKw(opts.kw)):'')+'</span><br>') : '';
+    var seg = '<div class="ar-seg" id="arpSeg">'+AR_PLACE_TYPES.map(function(t){ return '<button class="ar-seg-btn" data-type="'+t[0]+'">'+t[1]+'</button>'; }).join('')+'</div>';
     var o=el('div',{class:'ar-overlay', id:'arPlaceOverlay'});
     o.innerHTML =
       '<div class="ar-top"><b>Voir la clim sur le mur</b><br>'+modelLine+'<span>Vise un mur, balaie-le lentement pour qu\u2019il soit détecté, puis tape l\u2019écran pour poser l\u2019unité à l\u2019échelle réelle. Recule pour la voir en entier.</span></div>'+
       '<div class="ar-stats" id="arPlaceStats">Recherche d\u2019un mur…</div>'+
+      seg+
       '<div class="ar-cross"></div>'+
       '<div class="ar-bottom"><button class="ar-btn ghost" id="arpUndo">↶ Retirer</button><button class="ar-btn ghost" id="arpClear">Tout effacer</button><button class="ar-btn danger" id="arpQuit">✕ Quitter</button></div>';
     return o;
   }
-  function makeUnit(){
-    // Split mural : largeur sur X, hauteur sur Y, profondeur sur +Z (dos posé sur la surface)
+  // Convention commune : face de montage à z=0, extrusion vers +Z. La pose aligne +Z sur la normale
+  // de la surface visée → mur (dos au mur), plafond (cassette débordant vers le bas), sol (posé).
+  function makeUnit(type){
     var g=new THREE.Group();
-    var body=new THREE.Mesh(new THREE.BoxGeometry(0.9,0.29,0.20), new THREE.MeshLambertMaterial({color:0xf4f7f8}));
-    body.position.set(0,0,0.10); g.add(body);
-    var outlet=new THREE.Mesh(new THREE.BoxGeometry(0.84,0.05,0.012), new THREE.MeshLambertMaterial({color:0x2a3942}));
-    outlet.position.set(0,-0.10,0.207); g.add(outlet);
-    var led=new THREE.Mesh(new THREE.SphereGeometry(0.006,10,10), new THREE.MeshBasicMaterial({color:0x37c6d0}));
-    led.position.set(0.36,-0.03,0.207); g.add(led);
+    var white=function(){ return new THREE.MeshLambertMaterial({color:0xf4f7f8}); };
+    var dark =function(){ return new THREE.MeshLambertMaterial({color:0x2a3942}); };
+    if(type==='cassette'){
+      // Cassette de plafond : carré plat ~0,6 × 0,6 × 0,06 m, grille encastrée
+      var cb=new THREE.Mesh(new THREE.BoxGeometry(0.6,0.6,0.06), white()); cb.position.set(0,0,0.03); g.add(cb);
+      var cgr=new THREE.Mesh(new THREE.BoxGeometry(0.42,0.42,0.012), dark()); cgr.position.set(0,0,0.066); g.add(cgr);
+      return g;
+    }
+    if(type==='console'){
+      // Console : unité basse ~0,8 × 0,6 × 0,22 m
+      var kb=new THREE.Mesh(new THREE.BoxGeometry(0.8,0.6,0.22), white()); kb.position.set(0,0,0.11); g.add(kb);
+      var kout=new THREE.Mesh(new THREE.BoxGeometry(0.72,0.05,0.012), dark()); kout.position.set(0,0.24,0.227); g.add(kout);
+      return g;
+    }
+    if(type==='outdoor'){
+      // Groupe extérieur : ~0,85 × 0,56 × 0,30 m, gris, disque de ventilateur sur la face avant (+Y)
+      var ob=new THREE.Mesh(new THREE.BoxGeometry(0.85,0.56,0.30), new THREE.MeshLambertMaterial({color:0x9aa3aa})); ob.position.set(0,0,0.15); g.add(ob);
+      var fan=new THREE.Mesh(new THREE.CircleGeometry(0.21,28), new THREE.MeshLambertMaterial({color:0x3a4248, side:THREE.DoubleSide}));
+      fan.rotation.x=-Math.PI/2; fan.position.set(0,0.281,0.15); g.add(fan); // face avant verticale (+Y)
+      return g;
+    }
+    // Split mural (défaut) : ~0,9 × 0,29 × 0,20 m, bandeau de soufflage + LED
+    var body=new THREE.Mesh(new THREE.BoxGeometry(0.9,0.29,0.20), white()); body.position.set(0,0,0.10); g.add(body);
+    var outlet=new THREE.Mesh(new THREE.BoxGeometry(0.84,0.05,0.012), dark()); outlet.position.set(0,-0.10,0.207); g.add(outlet);
+    var led=new THREE.Mesh(new THREE.SphereGeometry(0.006,10,10), new THREE.MeshBasicMaterial({color:0x37c6d0})); led.position.set(0.36,-0.03,0.207); g.add(led);
     return g;
   }
   function launchARPlace(opts){
@@ -1685,6 +1709,14 @@
 
     var renderer, scene, camera, reticle, session=null, hitTestSource=null, refSpace=null;
     var placed=[], lastStats='';
+    var validTypes={mural:1,cassette:1,console:1,outdoor:1};
+    var currentType=(opts.type && validTypes[opts.type]) ? opts.type : 'mural';
+
+    // Empêche un tap sur le sélecteur (DOM) de déclencher une pose (select) : standard beforexrselect.
+    overlay.addEventListener('beforexrselect', function(ev){ ev.preventDefault(); });
+    var segBtns=overlay.querySelectorAll('.ar-seg-btn');
+    function setType(tp){ if(!validTypes[tp]) return; currentType=tp; for(var i=0;i<segBtns.length;i++){ segBtns[i].classList.toggle('on', segBtns[i].getAttribute('data-type')===tp); } lastStats=''; updateStats(); }
+    for(var si=0; si<segBtns.length; si++){ (function(b){ b.addEventListener('click', function(ev){ ev.preventDefault(); ev.stopPropagation(); setType(b.getAttribute('data-type')); }); })(segBtns[si]); }
 
     try{
       renderer=new THREE.WebGLRenderer({antialias:true, alpha:true});
@@ -1699,12 +1731,14 @@
       reticle=new THREE.Mesh(new THREE.RingGeometry(0.06,0.085,32).rotateX(-Math.PI/2), new THREE.MeshBasicMaterial({color:0x0e9aa8}));
       reticle.matrixAutoUpdate=false; reticle.visible=false; scene.add(reticle);
     }catch(e){ cleanup(); alert('Initialisation 3D impossible : '+(e&&e.message||e)); return; }
+    setType(currentType);
 
     function updateStats(){
       if(!stats) return;
       var s = placed.length ? (placed.length+' unité(s) posée(s) · tape pour en ajouter')
                             : (reticle.visible ? 'Tape pour poser l\u2019unité' : 'Recherche d\u2019une surface…');
-      if(s!==lastStats){ stats.textContent=s; lastStats=s; }
+      var hint = AR_TARGET_HINT[currentType]||''; var s2 = hint? (hint+' · '+s) : s;
+      if(s2!==lastStats){ stats.textContent=s2; lastStats=s2; }
     }
     function placeUnit(){
       if(!reticle.visible) return;
@@ -1723,7 +1757,7 @@
       var right=new THREE.Vector3().crossVectors(localUp, normal).normalize();
       var basis=new THREE.Matrix4().makeBasis(right, localUp, normal);
       var quat=new THREE.Quaternion().setFromRotationMatrix(basis);
-      var unit=makeUnit(); unit.position.copy(pos); unit.quaternion.copy(quat);
+      var unit=makeUnit(currentType); unit.position.copy(pos); unit.quaternion.copy(quat);
       scene.add(unit); placed.push(unit); updateStats();
     }
     function undo(){ var u=placed.pop(); if(u) scene.remove(u); updateStats(); }
