@@ -59,9 +59,29 @@
     };
   }
   function newRoom(name){
-    return {id:UID(), name:name||'Pièce', surface:20, height:2.5, ori:'sud', glz:'moyen', iso:'moyenne', roof:false, occ:2, charge:'aucune', productId:null, liaisonM:null};
+    return {id:UID(), name:name||'Pièce', surface:20, height:2.5, ori:'sud', glz:'moyen', iso:'moyenne', roof:false, occ:2, charge:'aucune', productId:null, liaisonM:null, tech:newTech()};
   }
-  function newPlan(){ return { wcm:1000, hcm:700, grid:50, snap:25, rooms:[], items:[] }; }
+  // Relevé de pose par unité intérieure. Aucune donnée de sécurité en dur : les seuils/diamètres
+  // proviennent du catalogue (saisis par l'utilisateur) ; ici, uniquement le relevé terrain.
+  function newTech(){
+    return {
+      liaisonLen:0, deniv:0, diamLiquide:'', diamGaz:'',
+      condensats:'gravite', evacLen:0,
+      goulotteLen:0, goulotteSection:'',
+      trouDiam:60, trouNb:1, trouNote:'',
+      support:'equerres', elecNote:'', elecAmeneeLen:0,
+      elevation:null
+    };
+  }
+  function ensureRoomTech(r){
+    if(!r.tech || typeof r.tech!=='object'){ r.tech=newTech(); return r.tech; }
+    var d=newTech(); for(var k in d){ if(!(k in r.tech)) r.tech[k]=d[k]; }
+    return r.tech;
+  }
+  function ensureQuoteTech(q){ if(q && Array.isArray(q.rooms)) q.rooms.forEach(ensureRoomTech); return q; }
+  function newPlan(){ return { wcm:1000, hcm:700, grid:50, snap:25, rooms:[], items:[], tech:newPlanTech() }; }
+  function newPlanTech(){ return { goulottes:[], trous:[] }; }
+  function ensurePlanTech(p){ if(p && (!p.tech || typeof p.tech!=='object')) p.tech=newPlanTech(); else if(p && p.tech){ if(!Array.isArray(p.tech.goulottes)) p.tech.goulottes=[]; if(!Array.isArray(p.tech.trous)) p.tech.trous=[]; } return p; }
   var PLAN_ITEMS = {
     mural:   {label:'Split mural', w:90,  h:28, fill:'#e6f5f6', stroke:'#0e9aa8', cat:'indoor'},
     console: {label:'Console',     w:80,  h:50, fill:'#e6f5f6', stroke:'#0e9aa8', cat:'indoor'},
@@ -95,11 +115,14 @@
     if(Array.isArray(s.extras)) d.extras = s.extras;
     if(s.settings) d.settings = Object.assign(d.settings, s.settings);
     if(s.quote) d.quote = Object.assign(newQuote(), s.quote);
+    ensureQuoteTech(d.quote);
     if(s.plan) d.plan = Object.assign(newPlan(), s.plan);
+    ensurePlanTech(d.plan);
     if(s.primes){ d.primes=Object.assign(d.primes,s.primes); if(s.primes.mult)d.primes.mult=Object.assign(d.primes.mult,s.primes.mult); if(s.primes.capPct)d.primes.capPct=Object.assign(d.primes.capPct,s.primes.capPct); }
     if(s.finance) d.finance=Object.assign(d.finance,s.finance);
     if(s.savings) d.savings=Object.assign(d.savings,s.savings);
     if(Array.isArray(s.savedQuotes)) d.savedQuotes = s.savedQuotes;
+    d.savedQuotes.forEach(function(sq){ if(sq && sq.data) ensureQuoteTech(sq.data); });
     return d;
   }
   var saveTimer;
@@ -498,7 +521,7 @@
         var item=el('div',{class:'saved-item'});
         item.appendChild(el('div',{class:'meta'},[el('b',null,[sq.name]), el('span',null,[sq.date+' · '+euro.format(sq.total)])]));
         var loadB=el('button',{class:'btn subtle sm'},['Ouvrir']);
-        loadB.addEventListener('click',function(){ state.quote=JSON.parse(JSON.stringify(sq.data)); save(); render(); });
+        loadB.addEventListener('click',function(){ state.quote=ensureQuoteTech(JSON.parse(JSON.stringify(sq.data))); save(); render(); });
         var delB=el('button',{class:'btn danger sm'},['✕']);
         delB.addEventListener('click',function(){ state.savedQuotes=state.savedQuotes.filter(function(x){return x.id!==sq.id;}); save(); render(); });
         item.appendChild(loadB); item.appendChild(delB);
@@ -616,7 +639,7 @@
     p.appendChild(el('p',{class:'section-sub'},['Marque, modèle, type, puissance et prix matériel HTVA.']));
     var wrap=el('div',{class:'tbl-wrap',style:'margin-top:14px'});
     var tbl=el('table',{class:'tbl'});
-    tbl.innerHTML='<thead><tr><th>Marque</th><th>Modèle</th><th>Type</th><th class="r">Puiss. (kW)</th><th>Classe</th><th class="r">Prix HTVA</th><th></th></tr></thead>';
+    tbl.innerHTML='<thead><tr><th>Marque</th><th>Modèle</th><th>Type</th><th class="r">Puiss. (kW)</th><th>Classe</th><th class="r">Prix HTVA</th><th></th><th></th></tr></thead>';
     var tb=el('tbody');
     state.catalog.forEach(function(prod){ tb.appendChild(catalogRow(prod, tb)); });
     tbl.appendChild(tb); wrap.appendChild(tbl); p.appendChild(wrap);
@@ -624,6 +647,44 @@
     add.addEventListener('click',function(){ var prod={id:UID(),brand:'',model:'',type:'mural',kw:2.5,energy:'',price:0}; state.catalog.push(prod); tb.appendChild(catalogRow(prod, tb)); save(); });
     p.appendChild(add);
     c.appendChild(p); box.appendChild(c); return box;
+  }
+  var INDOOR_TECH_FIELDS=[
+    ['Ø liquide','diamLiquide','text','1/4'],['Ø gaz','diamGaz','text','3/8'],
+    ['Liaison incluse (m)','liaisonBaseLen','number','',0.5],['Liaison max (m)','liaisonMaxLen','number','',0.5],
+    ['Dénivelé max (m)','denivMax','number','',0.5],['Charge add. (g/m)','chargeGM','number','',1],
+    ['Disjoncteur conseillé (note)','disjoncteur','text','ex. 16 A — à confirmer'],['Section goulotte conseillée','goulotteSectionConseillee','text','60x45']
+  ];
+  var OUTDOOR_TECH_FIELDS=[
+    ['Dénivelé max (m)','denivMax','number','',0.5],['Disjoncteur conseillé (note)','disjoncteur','text','ex. 16 A — à confirmer']
+  ];
+  // Champs techniques par modèle : tous optionnels, livrés vides. L'app les applique au relevé
+  // quand ils existent, sinon « à confirmer ». Aucune valeur de sécurité par défaut.
+  function modelTechField(obj, def){
+    var label=def[0], key=def[1], type=def[2]||'text', ph=def[3], step=def[4];
+    var i=el('input',{type:type}); if(type==='number'){ i.step=step||'0.1'; i.min='0'; }
+    i.value=(obj[key]==null?'':obj[key]); if(ph) i.placeholder=ph;
+    i.addEventListener('input',function(){ obj[key] = (type==='number') ? (i.value===''?'':+i.value) : i.value; save(); });
+    return el('label',{class:'field'},[el('span',null,[label]),i]);
+  }
+  function techFieldsRow(obj, defs, colspan){
+    var tr=el('tr',{class:'tech-row'});
+    var cell=el('td',{colspan:String(colspan)});
+    cell.appendChild(el('div',{class:'banner info',style:'margin-bottom:10px',html:'<div>Données techniques du modèle (optionnelles). Le disjoncteur conseillé est une <b>note à confirmer par l’électricien</b> ; la charge de réfrigérant déduite reste une estimation à confirmer et peser par l’installateur certifié.</div>'}));
+    var g=el('div',{class:'grid g3',style:'gap:10px'});
+    defs.forEach(function(d){ g.appendChild(modelTechField(obj,d)); });
+    cell.appendChild(g); tr.appendChild(cell);
+    tr.style.display='none';
+    return tr;
+  }
+  function techToggleCell(getDefs, getColspan, hostObj){
+    var detailsTr=null;
+    var b=el('button',{class:'btn subtle sm',type:'button'},['⚙ Tech']);
+    b.addEventListener('click',function(){
+      var mainTr=b.closest('tr');
+      if(!detailsTr){ detailsTr=techFieldsRow(hostObj, getDefs, getColspan); mainTr.parentNode.insertBefore(detailsTr, mainTr.nextSibling); }
+      var open=detailsTr.style.display==='none'; detailsTr.style.display=open?'':'none'; b.setAttribute('aria-pressed', open);
+    });
+    return td(b);
   }
   function catalogRow(prod, tb){
     var tr=el('tr');
@@ -633,6 +694,7 @@
     tr.appendChild(tdc('col-num', cellInput(prod,'kw','number','',0.1)));
     tr.appendChild(td(cellInput(prod,'energy','text','A++')));
     tr.appendChild(tdc('col-num', cellEur(prod,'price')));
+    tr.appendChild(techToggleCell(INDOOR_TECH_FIELDS, 8, prod));
     tr.appendChild(delCell(function(){ state.catalog=state.catalog.filter(function(x){return x.id!==prod.id;}); tr.remove(); save(); }));
     return tr;
   }
@@ -645,7 +707,7 @@
     p.appendChild(el('p',{class:'section-sub'},['Le devis sélectionne automatiquement le plus petit groupe couvrant la puissance et le nombre d\u2019unités.']));
     var wrap=el('div',{class:'tbl-wrap',style:'margin-top:14px'});
     var tbl=el('table',{class:'tbl'});
-    tbl.innerHTML='<thead><tr><th>Marque</th><th>Modèle</th><th class="r">Puiss. (kW)</th><th class="r">Sorties</th><th class="r">Prix HTVA</th><th></th></tr></thead>';
+    tbl.innerHTML='<thead><tr><th>Marque</th><th>Modèle</th><th class="r">Puiss. (kW)</th><th class="r">Sorties</th><th class="r">Prix HTVA</th><th></th><th></th></tr></thead>';
     var tb=el('tbody');
     state.outdoors.forEach(function(o){ tb.appendChild(outdoorRow(o)); });
     tbl.appendChild(tb); wrap.appendChild(tbl); p.appendChild(wrap);
@@ -661,6 +723,7 @@
     tr.appendChild(tdc('col-num', cellInput(o,'kw','number','',0.1)));
     tr.appendChild(tdc('col-num', cellInput(o,'ports','number','',1)));
     tr.appendChild(tdc('col-num', cellEur(o,'price')));
+    tr.appendChild(techToggleCell(OUTDOOR_TECH_FIELDS, 7, o));
     tr.appendChild(delCell(function(){ state.outdoors=state.outdoors.filter(function(x){return x.id!==o.id;}); tr.remove(); save(); }));
     return tr;
   }
@@ -1308,7 +1371,7 @@
       var sel=el('select',{style:'width:130px'});
       DASH_STATUS.forEach(function(s){ sel.appendChild(opt(s[0],s[1], (q.status||'brouillon')===s[0])); });
       sel.addEventListener('change',function(){ q.status=sel.value; save(); render(); });
-      var open=el('button',{class:'btn subtle sm'},['Ouvrir']); open.addEventListener('click',function(){ state.quote=JSON.parse(JSON.stringify(q.data)); state.ui.tab='devis'; save(); render(); });
+      var open=el('button',{class:'btn subtle sm'},['Ouvrir']); open.addEventListener('click',function(){ state.quote=ensureQuoteTech(JSON.parse(JSON.stringify(q.data))); state.ui.tab='devis'; save(); render(); });
       var del=el('button',{class:'btn danger sm'},['✕']); del.addEventListener('click',function(){ state.savedQuotes=state.savedQuotes.filter(function(x){return x.id!==q.id;}); save(); render(); });
       item.appendChild(sel); item.appendChild(open); item.appendChild(del);
       p.appendChild(item);
