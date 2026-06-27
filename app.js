@@ -229,6 +229,7 @@
     viewEl.innerHTML='';
     if(state.ui.tab==='devis') viewEl.appendChild(renderDevis());
     else if(state.ui.tab==='plan') viewEl.appendChild(renderPlan());
+    else if(state.ui.tab==='technique') viewEl.appendChild(renderTechnique());
     else if(state.ui.tab==='3d') viewEl.appendChild(renderThreeD());
     else if(state.ui.tab==='dash') viewEl.appendChild(renderDash());
     else viewEl.appendChild(renderAdmin());
@@ -236,6 +237,7 @@
   function setTab(){
     document.getElementById('tab-devis').setAttribute('aria-selected', state.ui.tab==='devis');
     document.getElementById('tab-plan').setAttribute('aria-selected', state.ui.tab==='plan');
+    document.getElementById('tab-technique').setAttribute('aria-selected', state.ui.tab==='technique');
     document.getElementById('tab-3d').setAttribute('aria-selected', state.ui.tab==='3d');
     document.getElementById('tab-dash').setAttribute('aria-selected', state.ui.tab==='dash');
     document.getElementById('tab-admin').setAttribute('aria-selected', state.ui.tab==='admin');
@@ -879,6 +881,7 @@
   /* ---------- tabs ---------- */
   document.getElementById('tab-devis').addEventListener('click',function(){ state.ui.tab='devis'; state.ui.clientView=false; render(); });
   document.getElementById('tab-plan').addEventListener('click',function(){ state.ui.tab='plan'; render(); });
+  document.getElementById('tab-technique').addEventListener('click',function(){ state.ui.tab='technique'; state.ui.clientView=false; render(); });
   document.getElementById('tab-3d').addEventListener('click',function(){ state.ui.tab='3d'; state.ui.clientView=false; render(); });
   document.getElementById('tab-dash').addEventListener('click',function(){ state.ui.tab='dash'; state.ui.clientView=false; render(); });
   document.getElementById('tab-admin').addEventListener('click',function(){ state.ui.tab='admin'; state.ui.clientView=false; render(); });
@@ -1336,6 +1339,144 @@
     }
     body.appendChild(el('div',{class:'cv-note'},['Climatisation réversible (pompe à chaleur air-air). TVA réduite à 6 % appliquée. Estimation sous réserve de visite technique. '+(snap.co.f||'')]));
     cv.appendChild(body); box.appendChild(cv);
+    return box;
+  }
+
+  /* ============================================================
+     TECHNIQUE / POSE — relevé, synthèse matériaux, fiche de pose
+     ============================================================ */
+  function techRound1(v){ return (Math.round((+v||0)*10)/10).toString().replace('.',','); }
+  function techValidationBanner(){
+    return el('div',{class:'banner warn',style:'margin-bottom:14px',html:'<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1l7 13H1L8 1z" stroke="#b6810f" stroke-width="1.4" stroke-linejoin="round"/></svg><div><b>Relevé de pose</b> — à valider sur site par l’installateur certifié et l’électricien. Dimensionnement électrique, charge de réfrigérant et perçages sous leur responsabilité.</div>'});
+  }
+  function drillWarning(){
+    return el('div',{class:'banner warn',style:'margin:6px 0',html:'<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1l7 13H1L8 1z" stroke="#b6810f" stroke-width="1.4" stroke-linejoin="round"/></svg><div><b>Avant perçage :</b> vérifier l’absence de câbles électriques, canalisations et éléments de structure. L’app ne certifie pas qu’un perçage est sûr.</div>'});
+  }
+  function prefillTech(r){
+    var tech=ensureRoomTech(r), prod=getProduct(r.productId);
+    if(prod){
+      if(tech.diamLiquide==='' && prod.diamLiquide) tech.diamLiquide=prod.diamLiquide;
+      if(tech.diamGaz==='' && prod.diamGaz) tech.diamGaz=prod.diamGaz;
+      if(tech.goulotteSection==='' && prod.goulotteSectionConseillee) tech.goulotteSection=prod.goulotteSectionConseillee;
+    }
+    if((+tech.goulotteLen||0)===0 && (+tech.liaisonLen||0)>0) tech.goulotteLen=+tech.liaisonLen;
+    return tech;
+  }
+
+  // Agrégation des fournitures sur toutes les unités. Logique pure → testable.
+  function computeTechSynthesis(){
+    var rooms=state.quote.rooms||[];
+    var liaisonByPair={}, goulotteBySection={}, trousByDiam={};
+    var pompes=0, evacTotal=0, elecTotal=0, liaisonTotal=0, goulotteTotal=0;
+    var chargeRows=[], chargeTotal=0, chargeUnknown=false, alerts=[];
+    rooms.forEach(function(r){
+      var tech=ensureRoomTech(r), prod=getProduct(r.productId);
+      var dl=tech.diamLiquide||(prod&&prod.diamLiquide)||'', dg=tech.diamGaz||(prod&&prod.diamGaz)||'';
+      var pair=(dl||'?')+'–'+(dg||'?');
+      var L=+tech.liaisonLen||0; if(L>0){ liaisonByPair[pair]=(liaisonByPair[pair]||0)+L; liaisonTotal+=L; }
+      var gs=tech.goulotteSection||(prod&&prod.goulotteSectionConseillee)||'?';
+      var GL=+tech.goulotteLen||0; if(GL>0){ goulotteBySection[gs]=(goulotteBySection[gs]||0)+GL; goulotteTotal+=GL; }
+      var d=+tech.trouDiam||0, n=+tech.trouNb||0; if(d>0&&n>0) trousByDiam[d]=(trousByDiam[d]||0)+n;
+      if(tech.condensats==='pompe') pompes++;
+      evacTotal+=+tech.evacLen||0; elecTotal+=+tech.elecAmeneeLen||0;
+      var base=(prod && prod.liaisonBaseLen!=='' && prod.liaisonBaseLen!=null)?+prod.liaisonBaseLen:null;
+      var gm=(prod && prod.chargeGM!=='' && prod.chargeGM!=null)?+prod.chargeGM:null;
+      if(base!=null && gm!=null){ var add=Math.max(0,L-base)*gm; chargeRows.push({room:r.name,grams:add}); chargeTotal+=add; }
+      else { chargeRows.push({room:r.name,grams:null}); chargeUnknown=true; }
+      var maxL=(prod && prod.liaisonMaxLen!=='' && prod.liaisonMaxLen!=null)?+prod.liaisonMaxLen:null;
+      var maxD=(prod && prod.denivMax!=='' && prod.denivMax!=null)?+prod.denivMax:null;
+      if(maxL!=null && L>maxL) alerts.push({room:r.name,msg:'liaison '+techRound1(L)+' m dépasse la longueur max du modèle ('+techRound1(maxL)+' m)'});
+      if(maxD!=null && (+tech.deniv||0)>maxD) alerts.push({room:r.name,msg:'dénivelé '+techRound1(tech.deniv)+' m dépasse le dénivelé max du modèle ('+techRound1(maxD)+' m)'});
+    });
+    return {liaisonByPair:liaisonByPair, goulotteBySection:goulotteBySection, trousByDiam:trousByDiam, pompes:pompes, evacTotal:evacTotal, elecTotal:elecTotal, liaisonTotal:liaisonTotal, goulotteTotal:goulotteTotal, chargeRows:chargeRows, chargeTotal:chargeTotal, chargeUnknown:chargeUnknown, alerts:alerts};
+  }
+
+  var techSynthHost=null;
+  function refreshTechSynth(){ if(techSynthHost){ techSynthHost.innerHTML=''; techSynthHost.appendChild(buildTechSynthesis()); } }
+  function techNum(label,obj,key,step){ var i=el('input',{type:'number',step:step||'1',min:'0'}); i.value=obj[key]; i.addEventListener('input',function(){ obj[key]=i.value===''?0:+i.value; save(); refreshTechSynth(); }); return el('label',{class:'field'},[el('span',null,[label]),i]); }
+  function techText(label,obj,key,ph){ var i=el('input',{type:'text'}); i.value=obj[key]||''; if(ph)i.placeholder=ph; i.addEventListener('input',function(){ obj[key]=i.value; save(); refreshTechSynth(); }); return el('label',{class:'field'},[el('span',null,[label]),i]); }
+  function techTextBadge(label,obj,key,ph,showBadge){ var i=el('input',{type:'text'}); i.value=obj[key]||''; if(ph)i.placeholder=ph; i.addEventListener('input',function(){ obj[key]=i.value; save(); refreshTechSynth(); }); var sp=el('span',null,[label]); if(showBadge) sp.appendChild(el('span',{class:'badge-confirm'},['à confirmer'])); return el('label',{class:'field'},[sp,i]); }
+  function techSel(label,obj,key,options){ var s=el('select'); options.forEach(function(o){ s.appendChild(opt(o[0],o[1],o[0]===obj[key])); }); s.addEventListener('change',function(){ obj[key]=s.value; save(); refreshTechSynth(); }); return el('label',{class:'field'},[el('span',null,[label]),s]); }
+
+  function techRoomCard(r){
+    var tech=r.tech, prod=getProduct(r.productId);
+    var card=el('div',{class:'room',style:'margin-bottom:14px'});
+    var head=el('div',{class:'room-head'});
+    head.appendChild(el('div',{class:'room-name'},[el('b',null,[r.name||'Pièce'])]));
+    head.appendChild(el('span',{style:'font-size:12.5px;color:var(--muted)'},[ prod?(prod.brand+' '+prod.model+' '+fmtKw(prod.kw)):'unité à définir' ]));
+    card.appendChild(head);
+    var body=el('div',{class:'room-body'});
+    var g1=el('div',{class:'room-grid'});
+    g1.appendChild(techNum('Longueur liaison (m)',tech,'liaisonLen','0.5'));
+    g1.appendChild(techNum('Dénivelé int/ext (m)',tech,'deniv','0.5'));
+    g1.appendChild(techTextBadge('Ø liquide',tech,'diamLiquide','1/4', !(prod&&prod.diamLiquide)));
+    g1.appendChild(techTextBadge('Ø gaz',tech,'diamGaz','3/8', !(prod&&prod.diamGaz)));
+    body.appendChild(g1);
+    var g2=el('div',{class:'room-grid'});
+    g2.appendChild(techSel('Condensats',tech,'condensats',[['gravite','Gravité'],['pompe','Pompe de relevage']]));
+    g2.appendChild(techNum('Évacuation (m)',tech,'evacLen','0.5'));
+    g2.appendChild(techNum('Goulotte (m)',tech,'goulotteLen','0.5'));
+    g2.appendChild(techTextBadge('Section goulotte',tech,'goulotteSection','60x45', !(prod&&prod.goulotteSectionConseillee)));
+    body.appendChild(g2);
+    var g3=el('div',{class:'room-grid'});
+    g3.appendChild(techNum('Ø trou (mm)',tech,'trouDiam','1'));
+    g3.appendChild(techNum('Nb trous',tech,'trouNb','1'));
+    g3.appendChild(techText('Position du trou',tech,'trouNote','ex. derrière l’unité, h 2,1 m'));
+    g3.appendChild(techSel('Support',tech,'support',[['equerres','Équerres'],['plots','Plots anti-vibration'],['console','Console au sol']]));
+    body.appendChild(g3);
+    body.appendChild(drillWarning());
+    var g4=el('div',{class:'room-grid'});
+    g4.appendChild(techText('Note électrique',tech,'elecNote','circuit dédié — à confirmer'));
+    g4.appendChild(techNum('Amenée élec (m)',tech,'elecAmeneeLen','0.5'));
+    body.appendChild(g4);
+    body.appendChild(el('div',{class:'section-sub',style:'font-size:12px'},[ prod&&prod.disjoncteur ? ('Disjoncteur conseillé (modèle) : '+prod.disjoncteur+' — à confirmer par l’électricien.') : 'Disjoncteur : à confirmer par l’électricien (non renseigné au catalogue).' ]));
+    card.appendChild(body);
+    return card;
+  }
+
+  function synthSection(title, lines){
+    var d=el('div',{style:'margin-bottom:10px'});
+    d.appendChild(el('div',{style:'font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:4px'},[title]));
+    if(!lines.length) d.appendChild(el('div',{class:'section-sub',style:'font-size:12px'},['—']));
+    else lines.forEach(function(ln){ d.appendChild(el('div',{style:'font-size:13px'},[ln])); });
+    return d;
+  }
+  function mapToLines(obj, suffix){ return Object.keys(obj).map(function(k){ return k+' : '+techRound1(obj[k])+(suffix||''); }); }
+  function buildTechSynthesis(){
+    var s=computeTechSynthesis();
+    var c=el('div',{class:'card summary'}); var p=el('div',{class:'pad'});
+    p.appendChild(el('div',{class:'eyebrow'},['Synthèse']));
+    p.appendChild(el('h2',{class:'section-title',style:'font-size:15px;margin-bottom:8px'},['Matériaux']));
+    if(s.alerts.length){ var ab=el('div',{class:'banner warn',style:'margin-bottom:10px'}); var inner=el('div'); inner.appendChild(el('b',null,['⚠ Dépassements modèle'])); s.alerts.forEach(function(a){ inner.appendChild(el('div',{style:'font-size:12px'},[a.room+' : '+a.msg])); }); ab.appendChild(inner); p.appendChild(ab); }
+    p.appendChild(synthSection('Liaisons frigorifiques', mapToLines(s.liaisonByPair, ' m')));
+    p.appendChild(synthSection('Goulottes', mapToLines(s.goulotteBySection, ' m')));
+    p.appendChild(synthSection('Trous de carottage', Object.keys(s.trousByDiam).map(function(d){ return 'Ø '+d+' mm : '+s.trousByDiam[d]; })));
+    p.appendChild(synthSection('Divers', ['Pompes de relevage : '+s.pompes, 'Évacuation condensats : '+techRound1(s.evacTotal)+' m', 'Amenée électrique : '+techRound1(s.elecTotal)+' m']));
+    var chargeLines=s.chargeRows.map(function(cr){ return cr.room+' : '+(cr.grams==null?'à confirmer':Math.round(cr.grams)+' g'); });
+    var chSec=synthSection('Charge add. de réfrigérant (estimation)', chargeLines);
+    chSec.appendChild(el('div',{style:'font-size:12px;font-weight:700;margin-top:4px'},['Total estimé : '+Math.round(s.chargeTotal)+' g'+(s.chargeUnknown?' (+ à confirmer)':'')]));
+    chSec.appendChild(el('div',{class:'section-sub',style:'font-size:11px'},['Estimation — à confirmer et peser par l’installateur certifié.']));
+    p.appendChild(chSec);
+    p.appendChild(el('div',{class:'banner warn',style:'margin-top:12px',html:'<div>Relevé de pose — à valider sur site par l’installateur certifié et l’électricien. Charge de réfrigérant, dimensionnement électrique et perçages sous leur responsabilité.</div>'}));
+    c.appendChild(p); return c;
+  }
+
+  function techToolbar(){ return el('div',{class:'plan-toolbar', id:'techToolbar'}); }
+  function renderTechnique(){
+    var box=el('div');
+    box.appendChild(el('div',{class:'eyebrow'},['Pose']));
+    box.appendChild(el('h2',{class:'section-title',style:'margin-bottom:10px'},['Relevé technique de pose']));
+    box.appendChild(techValidationBanner());
+    box.appendChild(techToolbar());
+    if(!(state.quote.rooms&&state.quote.rooms.length)){ box.appendChild(el('p',{class:'section-sub'},['Aucune pièce dans le devis. Ajoute des pièces dans l’onglet Devis pour relever la pose.'])); return box; }
+    var layout=el('div',{class:'layout'});
+    var main=el('div');
+    state.quote.rooms.forEach(function(r){ prefillTech(r); main.appendChild(techRoomCard(r)); });
+    var aside=el('div');
+    techSynthHost=el('div'); techSynthHost.appendChild(buildTechSynthesis());
+    aside.appendChild(techSynthHost);
+    layout.appendChild(main); layout.appendChild(aside);
+    box.appendChild(layout);
     return box;
   }
 

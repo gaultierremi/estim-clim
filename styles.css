@@ -211,6 +211,10 @@
   .cv-offer .big{font-size:30px; font-weight:850; letter-spacing:-1px}
   .cv-note{font-size:11.5px; color:var(--muted); margin-top:14px; line-height:1.6}
 
+  /* Technique / pose */
+  .badge-confirm{ display:inline-block; margin-left:6px; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:#6b4408; background:var(--warm-wash); border:1px solid #f0d8ad; border-radius:999px; padding:1px 7px; vertical-align:middle }
+  tr.tech-row > td{ background:var(--surface-2); padding:14px }
+
   /* AR overlay */
   .ar-overlay{ position:fixed; inset:0; z-index:1000; display:none; pointer-events:none; font-family:"Inter",system-ui,sans-serif }
   .ar-overlay.on{ display:block }
