@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Estim•clim Pro — chiffrage & catalogue</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="app">
+  <div class="head-row">
+    <span class="logo">Estim<b>•</b>clim<span class="badge">Pro</span></span>
+    <div class="tabs" role="tablist">
+      <button id="tab-devis" role="tab" aria-selected="true">Devis</button>
+      <button id="tab-plan" role="tab" aria-selected="false">Plan</button>
+      <button id="tab-3d" role="tab" aria-selected="false">3D</button>
+      <button id="tab-dash" role="tab" aria-selected="false">Tableau de bord</button>
+      <button id="tab-admin" role="tab" aria-selected="false">Réglages</button>
+    </div>
+    <div class="head-spacer"></div>
+    <span class="save-state" id="saveState" title="Sauvegarde dans le navigateur"><span class="led"></span><span id="saveTxt">Enregistré</span></span>
+    <button class="btn ghost sm" id="exportBtn" title="Télécharger une sauvegarde">⤓ Exporter</button>
+    <button class="btn ghost sm" id="importBtn" title="Charger une sauvegarde">⤒ Importer</button>
+    <button class="btn primary sm" id="printBtn">🖨 Devis PDF</button>
+    <input type="file" id="importFile" accept="application/json" style="display:none">
+  </div>
+</header>
+
+<main>
+  <div id="view"></div>
+</main>
+
+<div class="print-doc" id="printDoc"></div>
+<div class="foot-note">Données enregistrées localement dans ce navigateur — rien n'est envoyé en ligne. Pensez à <b>Exporter</b> une sauvegarde pour changer d'appareil ou ne rien perdre.</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
