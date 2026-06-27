@@ -902,6 +902,7 @@
     var clrB=el('button',{class:'planbtn'},['🗑 Vider']); clrB.addEventListener('click',function(){ if(!confirm('Vider le plan ?')) return; state.plan.rooms=[]; state.plan.items=[]; state.ui.planSel=null; save(); render(); }); t.appendChild(clrB);
     t.appendChild(el('span',{class:'sep'}));
     var arB=el('button',{class:'planbtn'},['📐 Mesurer en AR']); arB.addEventListener('click', startARMeasure); t.appendChild(arB);
+    var arViz=el('button',{class:'planbtn'},['🛋 Voir la clim sur le mur (AR)']); arViz.addEventListener('click', startARPlace); t.appendChild(arViz);
     var d3=el('button',{class:'btn subtle sm'},['🧊 Voir en 3D']); d3.addEventListener('click',function(){ state.ui.tab='3d'; render(); }); t.appendChild(d3);
     var cvB=el('button',{class:'btn primary sm'},['👁 Vue client']); cvB.addEventListener('click',function(){ state.ui.clientView=true; render(); }); t.appendChild(cvB);
     return t;
@@ -1422,6 +1423,122 @@
     state.plan.rooms.push(room);
     state.ui.planSel={kind:'room', id:room.id}; state.ui.tab='plan'; save(); render();
     setTimeout(function(){ alert('Pièce mesurée ajoutée au plan : '+wMeters.toFixed(2).replace('.',',')+' × '+dMeters.toFixed(2).replace('.',',')+' m, surface ≈ '+areaM2.toFixed(1).replace('.',',')+' m².\n\nLa pièce est approximée en rectangle — ajuste-la si elle est en L. Reporte la surface dans le devis pour le dimensionnement.'); },250);
+  }
+
+  /* ---------------- AR : poser la clim sur le mur ---------------- */
+  function startARPlace(){
+    var msg=arSupportMessage(); if(msg){ alert(msg); return; }
+    launchARPlace();
+  }
+  function buildARPlaceOverlay(){
+    var o=el('div',{class:'ar-overlay', id:'arPlaceOverlay'});
+    o.innerHTML =
+      '<div class="ar-top"><b>Voir la clim sur le mur</b><br><span>Vise un mur, balaie-le lentement pour qu\u2019il soit détecté, puis tape l\u2019écran pour poser l\u2019unité à l\u2019échelle réelle. Recule pour la voir en entier.</span></div>'+
+      '<div class="ar-stats" id="arPlaceStats">Recherche d\u2019un mur…</div>'+
+      '<div class="ar-cross"></div>'+
+      '<div class="ar-bottom"><button class="ar-btn ghost" id="arpUndo">↶ Retirer</button><button class="ar-btn ghost" id="arpClear">Tout effacer</button><button class="ar-btn danger" id="arpQuit">✕ Quitter</button></div>';
+    return o;
+  }
+  function makeUnit(){
+    // Split mural : largeur sur X, hauteur sur Y, profondeur sur +Z (dos posé sur la surface)
+    var g=new THREE.Group();
+    var body=new THREE.Mesh(new THREE.BoxGeometry(0.9,0.29,0.20), new THREE.MeshLambertMaterial({color:0xf4f7f8}));
+    body.position.set(0,0,0.10); g.add(body);
+    var outlet=new THREE.Mesh(new THREE.BoxGeometry(0.84,0.05,0.012), new THREE.MeshLambertMaterial({color:0x2a3942}));
+    outlet.position.set(0,-0.10,0.207); g.add(outlet);
+    var led=new THREE.Mesh(new THREE.SphereGeometry(0.006,10,10), new THREE.MeshBasicMaterial({color:0x37c6d0}));
+    led.position.set(0.36,-0.03,0.207); g.add(led);
+    return g;
+  }
+  function launchARPlace(){
+    var overlay=document.getElementById('arPlaceOverlay');
+    if(!overlay){ overlay=buildARPlaceOverlay(); document.body.appendChild(overlay); }
+    var stats=overlay.querySelector('#arPlaceStats');
+    overlay.classList.add('on');
+
+    var renderer, scene, camera, reticle, session=null, hitTestSource=null, refSpace=null;
+    var placed=[], lastStats='';
+
+    try{
+      renderer=new THREE.WebGLRenderer({antialias:true, alpha:true});
+      renderer.setPixelRatio(window.devicePixelRatio||1);
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.xr.enabled=true;
+      renderer.domElement.style.display='none'; document.body.appendChild(renderer.domElement);
+      scene=new THREE.Scene();
+      camera=new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 50);
+      scene.add(new THREE.HemisphereLight(0xffffff,0x8a9099,1.0));
+      var dl=new THREE.DirectionalLight(0xffffff,0.55); dl.position.set(1,3,2); scene.add(dl);
+      reticle=new THREE.Mesh(new THREE.RingGeometry(0.06,0.085,32).rotateX(-Math.PI/2), new THREE.MeshBasicMaterial({color:0x0e9aa8}));
+      reticle.matrixAutoUpdate=false; reticle.visible=false; scene.add(reticle);
+    }catch(e){ cleanup(); alert('Initialisation 3D impossible : '+(e&&e.message||e)); return; }
+
+    function updateStats(){
+      if(!stats) return;
+      var s = placed.length ? (placed.length+' unité(s) posée(s) · tape pour en ajouter')
+                            : (reticle.visible ? 'Tape pour poser l\u2019unité' : 'Recherche d\u2019une surface…');
+      if(s!==lastStats){ stats.textContent=s; lastStats=s; }
+    }
+    function placeUnit(){
+      if(!reticle.visible) return;
+      var m=reticle.matrix;
+      var pos=new THREE.Vector3().setFromMatrixPosition(m);
+      var normal=new THREE.Vector3(0,1,0).applyMatrix4(new THREE.Matrix4().extractRotation(m)).normalize();
+      var worldUp=new THREE.Vector3(0,1,0), localUp;
+      if(Math.abs(normal.dot(worldUp))>0.95){
+        // surface ~horizontale (sol/plafond) : « haut » de secours dans le plan
+        var ref=new THREE.Vector3(0,0,-1);
+        localUp=ref.sub(normal.clone().multiplyScalar(ref.dot(normal))).normalize();
+      } else {
+        // mur : on remet l\u2019unité d\u2019aplomb (vertical = haut du monde projeté sur le mur)
+        localUp=worldUp.clone().sub(normal.clone().multiplyScalar(worldUp.dot(normal))).normalize();
+      }
+      var right=new THREE.Vector3().crossVectors(localUp, normal).normalize();
+      var basis=new THREE.Matrix4().makeBasis(right, localUp, normal);
+      var quat=new THREE.Quaternion().setFromRotationMatrix(basis);
+      var unit=makeUnit(); unit.position.copy(pos); unit.quaternion.copy(quat);
+      scene.add(unit); placed.push(unit); updateStats();
+    }
+    function undo(){ var u=placed.pop(); if(u) scene.remove(u); updateStats(); }
+    function clearAll(){ placed.forEach(function(u){ scene.remove(u); }); placed=[]; updateStats(); }
+
+    navigator.xr.requestSession('immersive-ar', { requiredFeatures:['hit-test'], optionalFeatures:['dom-overlay'], domOverlay:{ root: overlay } })
+      .then(function(s){ session=s; renderer.xr.setReferenceSpaceType('local'); return renderer.xr.setSession(s); })
+      .then(function(){
+        session.addEventListener('select', placeUnit);
+        session.addEventListener('end', cleanup);
+        session.requestReferenceSpace('viewer').then(function(v){
+          if(session.requestHitTestSource) session.requestHitTestSource({space:v}).then(function(src){ hitTestSource=src; });
+        });
+        refSpace=renderer.xr.getReferenceSpace();
+        var ub=overlay.querySelector('#arpUndo'), cb=overlay.querySelector('#arpClear'), qb=overlay.querySelector('#arpQuit');
+        if(ub) ub.onclick=undo;
+        if(cb) cb.onclick=clearAll;
+        if(qb) qb.onclick=function(){ try{ if(session) session.end(); }catch(e){ cleanup(); } };
+        renderer.setAnimationLoop(loop); updateStats();
+      })
+      .catch(function(err){
+        cleanup();
+        alert('Impossible de démarrer l\u2019AR : '+(err&&err.message||err)+'\n\nVérifie : Chrome à jour, « Google Play Services for AR » installé, et accès via une adresse https.');
+      });
+
+    function loop(t, frame){
+      if(frame && hitTestSource){
+        if(!refSpace) refSpace=renderer.xr.getReferenceSpace();
+        var res=frame.getHitTestResults(hitTestSource);
+        if(res.length){ var pose=res[0].getPose(refSpace); if(pose){ reticle.visible=true; reticle.matrix.fromArray(pose.transform.matrix); } }
+        else reticle.visible=false;
+        updateStats();
+      }
+      try{ renderer.render(scene,camera); }catch(e){}
+    }
+    function cleanup(){
+      try{ if(renderer) renderer.setAnimationLoop(null); }catch(e){}
+      try{ if(hitTestSource && hitTestSource.cancel) hitTestSource.cancel(); }catch(e){}
+      if(overlay) overlay.classList.remove('on');
+      try{ if(renderer && renderer.domElement && renderer.domElement.parentNode) renderer.domElement.parentNode.removeChild(renderer.domElement); }catch(e){}
+      try{ if(renderer) renderer.dispose(); }catch(e){}
+    }
   }
 
   /* ---------------- init ---------------- */
