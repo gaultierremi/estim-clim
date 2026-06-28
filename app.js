@@ -1650,7 +1650,77 @@
     var addB=el('button',{class:'btn primary sm'},['＋ Ajouter les fournitures au devis']);
     addB.addEventListener('click', addTechSuppliesToQuote);
     t.appendChild(addB);
+    var fpB=el('button',{class:'btn subtle sm'},['🖨 Fiche de pose (PDF)']);
+    fpB.addEventListener('click',function(){ buildFichePose(); window.print(); });
+    t.appendChild(fpB);
     return t;
+  }
+
+  /* ---- Fiche de pose PDF (installateur) ---- */
+  function supportLabel(s){ return ({equerres:'Équerres', plots:'Plots anti-vibration', console:'Console au sol'})[s] || (s||'—'); }
+  function photoForRoom(r){ var pr=(state.plan.rooms||[]).filter(function(x){ return x.name===r.name && x.photo; })[0]; return pr?pr.photo:null; }
+  function elevationSVGString(e){
+    recomputeElevation(e);
+    var SCALE=70, M=28, Wpx=e.wallW*SCALE, Hpx=e.wallH*SCALE, vbW=Wpx+M*2, vbH=Hpx+M*1.8;
+    function MX(m){return M+m*SCALE;} function MY(m){return M+m*SCALE;}
+    var s='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+vbW+' '+vbH+'" style="display:block;width:100%;height:auto;background:#fff" font-family="Inter,system-ui,sans-serif">';
+    s+='<rect x="'+M+'" y="'+M+'" width="'+Wpx+'" height="'+Hpx+'" fill="#fff" stroke="#9fb6bd" stroke-width="2"/>';
+    s+='<line x1="'+(M-6)+'" y1="'+(M+Hpx)+'" x2="'+(M+Wpx+6)+'" y2="'+(M+Hpx)+'" stroke="#5e727c" stroke-width="3"/>';
+    s+='<text x="'+(M+Wpx+8)+'" y="'+(M+Hpx+4)+'" font-size="11" fill="#5e727c">sol</text>';
+    s+='<polyline points="'+e.goulottePath.map(function(p){return MX(p.x)+','+MY(p.y);}).join(' ')+'" fill="none" stroke="#c9760f" stroke-width="3" stroke-dasharray="7 5" stroke-linejoin="round" stroke-linecap="round"/>';
+    s+='<rect x="'+MX(e.unitX)+'" y="'+MY(e.unitY)+'" width="'+(e.unitW*SCALE)+'" height="'+(e.unitH*SCALE)+'" rx="3" fill="#e6f5f6" stroke="#0e9aa8" stroke-width="2"/>';
+    s+='<text x="'+MX(e.unitX+e.unitW/2)+'" y="'+(MY(e.unitY+e.unitH/2)+3)+'" text-anchor="middle" font-size="10" fill="#0b6e78" font-weight="700">Unité</text>';
+    var hr=Math.max(5,(e.holeD/1000)*SCALE/2);
+    s+='<circle cx="'+MX(e.holeX)+'" cy="'+MY(e.holeY)+'" r="'+hr+'" fill="rgba(191,70,49,.2)" stroke="#bf4631" stroke-width="2"/>';
+    s+='<text x="'+(MX(e.holeX)+hr+2)+'" y="'+(MY(e.holeY)+4)+'" font-size="10" fill="#bf4631" font-weight="700">Ø'+e.holeD+'</text>';
+    s+='</svg>'; return s;
+  }
+  function buildFichePose(){
+    var co=state.company, q=state.quote, s=computeTechSynthesis();
+    var dateStr=q.date?new Date(q.date+'T00:00').toLocaleDateString('fr-BE'):new Date().toLocaleDateString('fr-BE');
+    var logoHtml=co.logo?'<img src="'+co.logo+'" alt="logo">':'';
+    var html='';
+    html+='<div class="pd-head"><div class="pd-co">'+logoHtml+'<div class="co-name">'+escapeHtml(co.name||'Votre société')+'</div>'+
+      (co.addr?escapeHtml(co.addr)+'<br>':'')+(co.phone?'Tél. '+escapeHtml(co.phone)+'  ':'')+(co.email?escapeHtml(co.email):'')+'</div>'+
+      '<div class="pd-meta"><b>FICHE DE POSE</b><br>Date : '+dateStr+'<br><br>'+(q.client.name?'<b>'+escapeHtml(q.client.name)+'</b><br>':'')+(q.client.addr?escapeHtml(q.client.addr)+'<br>':'')+(q.client.phone?escapeHtml(q.client.phone):'')+'</div></div>';
+    html+='<div class="pd-section-label">Fiche de pose — relevé technique</div>';
+    html+='<div class="fp-banner">Relevé de pose — à valider sur site par l’installateur certifié et l’électricien. Dimensionnement électrique, charge de réfrigérant et perçages sous leur responsabilité.</div>';
+    if(!(q.rooms&&q.rooms.length)) html+='<p style="color:#8499a1">Aucune unité au devis.</p>';
+    q.rooms.forEach(function(r){
+      ensureRoomTech(r); var tech=r.tech, prod=getProduct(r.productId);
+      html+='<div class="fp-unit">';
+      html+='<div class="fp-unit-title">'+escapeHtml(r.name||'Pièce')+' — '+escapeHtml(prod?(prod.brand+' '+prod.model+' '+fmtKw(prod.kw)):'unité à définir')+'</div>';
+      function ln(k,v){ return '<tr><td class="fp-k">'+k+'</td><td>'+v+'</td></tr>'; }
+      html+='<table class="pd-table fp-table"><tbody>';
+      html+=ln('Liaison', techRound1(tech.liaisonLen)+' m · Ø '+escapeHtml(tech.diamLiquide||'?')+' / '+escapeHtml(tech.diamGaz||'?')+' · dénivelé '+techRound1(tech.deniv)+' m');
+      html+=ln('Condensats', (tech.condensats==='pompe'?'Pompe de relevage':'Gravité')+' · évacuation '+techRound1(tech.evacLen)+' m');
+      html+=ln('Goulotte', techRound1(tech.goulotteLen)+' m · section '+escapeHtml(tech.goulotteSection||'?'));
+      html+=ln('Trou de carottage', 'Ø '+(+tech.trouDiam||0)+' mm × '+(+tech.trouNb||0)+(tech.trouNote?' · '+escapeHtml(tech.trouNote):''));
+      html+=ln('Support', escapeHtml(supportLabel(tech.support)));
+      html+=ln('Électricité', escapeHtml(tech.elecNote||'—')+' · amenée '+techRound1(tech.elecAmeneeLen)+' m · '+(prod&&prod.disjoncteur?'disjoncteur conseillé '+escapeHtml(prod.disjoncteur)+' (à confirmer)':'disjoncteur à confirmer par l’électricien'));
+      html+='</tbody></table>';
+      html+='<div class="fp-drill">⚠ Avant perçage : vérifier l’absence de câbles électriques, canalisations et éléments de structure.</div>';
+      var ph=photoForRoom(r);
+      if(tech.elevation || ph){
+        html+='<div class="fp-media">';
+        if(tech.elevation) html+='<div class="fp-elev">'+elevationSVGString(tech.elevation)+'<div class="fp-cote">h sous unité '+techRound1(tech.elevation.hauteurSousUnite)+' m · trou '+techRound1(tech.elevation.hauteurTrou)+' m · goulotte '+techRound1(tech.elevation.goulotteLenElev)+' m</div></div>';
+        if(ph) html+='<div class="fp-photo"><img src="'+ph+'" alt="photo de la pièce"></div>';
+        html+='</div>';
+      }
+      html+='</div>';
+    });
+    html+='<div class="pd-section-label">Synthèse matériaux</div><table class="pd-table"><tbody>';
+    function sr(k,v){ return '<tr><td class="fp-k">'+k+'</td><td>'+v+'</td></tr>'; }
+    html+=sr('Liaisons frigorifiques', mapToLines(s.liaisonByPair,' m').join(' · ')||'—');
+    html+=sr('Goulottes', mapToLines(s.goulotteBySection,' m').join(' · ')||'—');
+    html+=sr('Trous de carottage', Object.keys(s.trousByDiam).map(function(d){return 'Ø'+d+' : '+s.trousByDiam[d];}).join(' · ')||'—');
+    html+=sr('Pompes / supports', s.pompes+' pompe(s) · '+s.supportCount+' support(s)');
+    html+=sr('Évacuation / amenée élec', techRound1(s.evacTotal)+' m / '+techRound1(s.elecTotal)+' m');
+    html+=sr('Charge réfrigérant (estimation)', Math.round(s.chargeTotal)+' g'+(s.chargeUnknown?' (+ à confirmer)':'')+' — à confirmer et peser par l’installateur certifié');
+    html+='</tbody></table>';
+    if(s.alerts.length) html+='<div class="fp-banner">⚠ '+s.alerts.map(function(a){return escapeHtml(a.room+' : '+a.msg);}).join(' ; ')+'</div>';
+    if(planHasContent()) html+='<div style="page-break-before:always"></div><div class="pd-section-label">Plan d’implantation annoté</div><div style="border:1px solid #dce5e8;border-radius:8px;overflow:hidden;margin-top:4px">'+planSVGString({technical:true})+'</div>';
+    document.getElementById('printDoc').innerHTML=html;
   }
 
   /* ---- Éditeur d'élévation de mur (par unité) ---- */

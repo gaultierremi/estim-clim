@@ -180,6 +180,18 @@
   .pd-tot div{display:flex; justify-content:space-between; padding:4px 8px}
   .pd-tot .grand{font-size:17px; font-weight:850; border-top:2px solid var(--ink); margin-top:4px; padding-top:8px}
   .pd-legal{margin-top:16px; font-size:10px; color:var(--muted); border-top:1px solid var(--line); padding-top:10px; line-height:1.55}
+  /* fiche de pose */
+  .fp-banner{background:var(--warm-wash); border:1px solid #f0d8ad; color:#6b4408; border-radius:8px; padding:8px 12px; font-size:11px; margin:6px 0 14px; line-height:1.5}
+  .fp-unit{border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin-bottom:12px; page-break-inside:avoid}
+  .fp-unit-title{font-size:14px; font-weight:800; color:var(--ink); margin-bottom:6px}
+  .fp-table td{padding:4px 8px}
+  .fp-table .fp-k{color:var(--muted); width:150px; font-size:10px; text-transform:uppercase; letter-spacing:.05em}
+  .fp-drill{font-size:10px; color:#6b4408; background:var(--warm-wash); border:1px solid #f0d8ad; border-radius:6px; padding:5px 8px; margin-top:6px}
+  .fp-media{display:flex; gap:12px; margin-top:10px; align-items:flex-start}
+  .fp-elev{flex:1; min-width:0; border:1px solid var(--line); border-radius:8px; padding:6px}
+  .fp-cote{font-size:10px; color:var(--muted); margin-top:4px; text-align:center}
+  .fp-photo{width:38%; flex:none}
+  .fp-photo img{width:100%; border-radius:8px; object-fit:cover; max-height:160px}
 
   /* plan editor */
   .plan-toolbar{display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:14px}
