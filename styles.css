@@ -21,7 +21,8 @@
     color:#eef4f5; position:sticky; top:0; z-index:30; box-shadow:0 6px 22px rgba(15,27,36,.18);
   }
   .head-row{display:flex; align-items:center; gap:14px; max-width:1200px; margin:0 auto; padding:14px 20px;}
-  .logo{font-weight:800; letter-spacing:-.5px; font-size:19px; white-space:nowrap}
+  .logo{font-weight:800; letter-spacing:-.5px; font-size:19px; white-space:nowrap; font-family:inherit; background:transparent; border:none; color:inherit; cursor:pointer; padding:0}
+  .logo:focus-visible{outline:2px solid #7fd6df; outline-offset:3px; border-radius:6px}
   .logo b{color:var(--cool)}
   .badge{font-size:10px; font-weight:800; letter-spacing:.1em; text-transform:uppercase; background:var(--cool); color:#04282b; padding:2px 7px; border-radius:6px; margin-left:2px}
   .head-spacer{flex:1}
@@ -222,6 +223,21 @@
   .cv-offer{margin-top:20px; border-top:1px solid var(--line); padding-top:16px; display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:12px}
   .cv-offer .big{font-size:30px; font-weight:850; letter-spacing:-1px}
   .cv-note{font-size:11.5px; color:var(--muted); margin-top:14px; line-height:1.6}
+
+  /* Portail d'accueil */
+  .home{max-width:880px; margin:0 auto}
+  .home-hero{text-align:center; padding:24px 10px 8px}
+  .home-title{font-size:30px; font-weight:850; letter-spacing:-.5px; margin:6px 0 8px}
+  .home-sub{color:var(--muted); font-size:14px; max-width:560px; margin:0 auto; line-height:1.6}
+  .home-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-top:24px}
+  @media (max-width:760px){ .home-grid{grid-template-columns:1fr} }
+  .home-card{text-align:left; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:20px; cursor:pointer; font:inherit; box-shadow:var(--shadow); transition:transform .08s, border-color .12s}
+  .home-card:hover{border-color:var(--cool); transform:translateY(-2px)}
+  .home-card:focus-visible{outline:3px solid #7fd6df; outline-offset:2px}
+  .home-ic{font-size:30px; margin-bottom:10px}
+  .home-card-t{font-size:16px; font-weight:800; color:var(--ink); margin-bottom:4px}
+  .home-card-d{font-size:13px; color:var(--muted); line-height:1.5}
+  .home-foot{text-align:center; margin-top:22px}
 
   /* Technique / pose */
   .badge-confirm{ display:inline-block; margin-left:6px; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:#6b4408; background:var(--warm-wash); border:1px solid #f0d8ad; border-radius:999px; padding:1px 7px; vertical-align:middle }

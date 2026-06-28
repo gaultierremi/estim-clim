@@ -46,7 +46,7 @@
       quote: newQuote(),
       plan: newPlan(),
       savedQuotes:[],
-      ui:{ tab:'devis', adminSection:'societe', clientPrices:true, clientView:false, planSel:null }
+      ui:{ tab:'home', adminSection:'societe', clientPrices:true, clientView:false, planSel:null }
     };
   }
   function newQuote(){
@@ -235,7 +235,9 @@
     if(threeCleanup){ try{threeCleanup();}catch(e){} threeCleanup=null; }
     setTab();
     viewEl.innerHTML='';
-    if(state.ui.tab==='devis') viewEl.appendChild(renderDevis());
+    if(state.ui.tab==='home') viewEl.appendChild(renderHome());
+    else if(state.ui.tab==='tournee') viewEl.appendChild(renderTournee());
+    else if(state.ui.tab==='devis') viewEl.appendChild(renderDevis());
     else if(state.ui.tab==='plan') viewEl.appendChild(renderPlan());
     else if(state.ui.tab==='technique') viewEl.appendChild(renderTechnique());
     else if(state.ui.tab==='3d') viewEl.appendChild(renderThreeD());
@@ -246,10 +248,48 @@
     document.getElementById('tab-devis').setAttribute('aria-selected', state.ui.tab==='devis');
     document.getElementById('tab-plan').setAttribute('aria-selected', state.ui.tab==='plan');
     document.getElementById('tab-technique').setAttribute('aria-selected', state.ui.tab==='technique');
+    document.getElementById('tab-tournee').setAttribute('aria-selected', state.ui.tab==='tournee');
     document.getElementById('tab-3d').setAttribute('aria-selected', state.ui.tab==='3d');
     document.getElementById('tab-dash').setAttribute('aria-selected', state.ui.tab==='dash');
     document.getElementById('tab-admin').setAttribute('aria-selected', state.ui.tab==='admin');
     document.getElementById('printBtn').style.display = (state.ui.tab==='devis'||state.ui.tab==='plan') ? '' : 'none';
+  }
+
+  /* ============================================================
+     PORTAIL D'ACCUEIL
+     ============================================================ */
+  function homeCard(icon,title,desc,on){
+    var c=el('button',{class:'home-card'});
+    c.appendChild(el('div',{class:'home-ic'},[icon]));
+    c.appendChild(el('div',{class:'home-card-t'},[title]));
+    c.appendChild(el('div',{class:'home-card-d'},[desc]));
+    c.addEventListener('click',on);
+    return c;
+  }
+  function renderHome(){
+    var box=el('div',{class:'home'});
+    var hero=el('div',{class:'home-hero'});
+    hero.appendChild(el('div',{class:'eyebrow'},['Estim·clim Pro']));
+    hero.appendChild(el('h1',{class:'home-title'},['Que veux-tu faire ?']));
+    hero.appendChild(el('p',{class:'home-sub'},['Chiffre une clim, planifie ta tournée du jour, retrouve tes devis. Tout est enregistré dans ce navigateur, rien n’est envoyé en ligne.']));
+    box.appendChild(hero);
+    var grid=el('div',{class:'home-grid'});
+    grid.appendChild(homeCard('📋','Nouveau devis','Scoper les pièces, dimensionner et chiffrer.', function(){ state.ui.tab='devis'; render(); }));
+    grid.appendChild(homeCard('🗺️','Planifier ma tournée','Coller des adresses → itinéraire optimisé + planning de la journée.', function(){ state.ui.tab='tournee'; render(); }));
+    grid.appendChild(homeCard('📂','Devis enregistrés','Suivre le pipeline et rouvrir un devis.', function(){ state.ui.tab='dash'; render(); }));
+    box.appendChild(grid);
+    var foot=el('div',{class:'home-foot'});
+    var cfg=el('button',{class:'btn subtle sm'},['⚙ Réglages']); cfg.addEventListener('click',function(){ state.ui.tab='admin'; render(); });
+    foot.appendChild(cfg);
+    box.appendChild(foot);
+    return box;
+  }
+  function renderTournee(){
+    var box=el('div');
+    box.appendChild(el('div',{class:'eyebrow'},['Tournée']));
+    box.appendChild(el('h2',{class:'section-title',style:'margin-bottom:10px'},['Planifier ma tournée']));
+    box.appendChild(el('p',{class:'section-sub'},['Module en cours de construction.']));
+    return box;
   }
 
   /* ============================================================
@@ -910,6 +950,8 @@
   document.getElementById('tab-devis').addEventListener('click',function(){ state.ui.tab='devis'; state.ui.clientView=false; render(); });
   document.getElementById('tab-plan').addEventListener('click',function(){ state.ui.tab='plan'; render(); });
   document.getElementById('tab-technique').addEventListener('click',function(){ state.ui.tab='technique'; state.ui.clientView=false; render(); });
+  document.getElementById('tab-tournee').addEventListener('click',function(){ state.ui.tab='tournee'; state.ui.clientView=false; render(); });
+  document.getElementById('brandHome').addEventListener('click',function(){ state.ui.tab='home'; state.ui.clientView=false; render(); });
   document.getElementById('tab-3d').addEventListener('click',function(){ state.ui.tab='3d'; state.ui.clientView=false; render(); });
   document.getElementById('tab-dash').addEventListener('click',function(){ state.ui.tab='dash'; state.ui.clientView=false; render(); });
   document.getElementById('tab-admin').addEventListener('click',function(){ state.ui.tab='admin'; state.ui.clientView=false; render(); });
@@ -2360,7 +2402,7 @@
 
   /* ---------------- init ---------------- */
   load();
-  state.ui = Object.assign({tab:'devis',adminSection:'societe',clientPrices:true,clientView:false,planSel:null,shared:false}, state.ui||{});
+  state.ui = Object.assign({tab:'home',adminSection:'societe',clientPrices:true,clientView:false,planSel:null,shared:false}, state.ui||{});
   if(!tryRenderShared()){
     state.quote.rooms.forEach(function(r){ if(!r.productId) autoSelectProduct(r); });
     render();
