@@ -486,6 +486,14 @@
     fetchOSRM().then(function(okk){ if(statusEl) statusEl.textContent=okk?'Durées routières (OSRM) appliquées.':'OSRM indisponible — durées estimées à vol d’oiseau.'; save(); refreshItin(); })
       .catch(function(){ if(statusEl) statusEl.textContent='OSRM indisponible — durées estimées à vol d’oiseau.'; });
   }
+  function startDevisForStop(s){
+    var q=state.quote, hasWork = q.client.name || q.rooms.length>1 || (q.rooms[0]&&q.rooms[0].productId) || q.extraLines.length;
+    if(hasWork && !confirm('Démarrer un nouveau devis pour '+(s.name||'ce client')+' ? Le devis courant non enregistré sera remplacé.')) return;
+    state.quote=newQuote(); state.quote.rooms.forEach(autoSelectProduct);
+    state.quote.client={ name:s.name||'', addr:s.addr||'', phone:s.phone||'', email:s.email||'' };
+    state.tour.activeStopId=s.id;
+    state.ui.tab='devis'; save(); render();
+  }
   function buildContactRow(s, row){
     var slot=stopSlotText(row); var msg=ensureTourMsg();
     var body=tourMsgFill(msg.body, s, slot), subj=tourMsgFill(msg.subject, s, slot);
@@ -499,6 +507,9 @@
     var sel=el('select',{class:'itin-status status-'+(s.status||'').replace(/\s/g,'-')}); TOUR_STATUS.forEach(function(o){ sel.appendChild(opt(o[0],o[1],s.status===o[0])); });
     sel.addEventListener('change',function(){ s.status=sel.value; save(); refreshItin(); });
     wrap.appendChild(sel);
+    var dv=el('button',{class:'cbtn',title:'Faire le devis (pré-rempli)'},[s.devisId?'📋 ✓':'📋 Devis']);
+    dv.addEventListener('click',function(){ startDevisForStop(s); });
+    wrap.appendChild(dv);
     return wrap;
   }
   function buildItinerary(){
@@ -506,7 +517,8 @@
     var c=el('div');
     if(!seq.length){ c.appendChild(el('p',{class:'section-sub'},['Optimise l’itinéraire pour générer le planning (arrêts géocodés requis).'])); return c; }
     var sch=computeSchedule();
-    c.appendChild(el('div',{class:'banner info',style:'margin-bottom:10px',html:'<div><b>Journée :</b> '+seq.length+' arrêt(s) · départ '+escapeHtml(T.startTime)+' · '+techRound1(sch.totalKm)+' km · '+fmtDur(sch.totalTravel)+' de route · <b>fin estimée '+fmtHM(sch.end)+'</b></div>'}));
+    var done=T.stops.filter(function(s){return s.status==='devis fait'||s.devisId;}).length;
+    c.appendChild(el('div',{class:'banner info',style:'margin-bottom:10px',html:'<div><b>Journée :</b> '+seq.length+' arrêt(s) · départ '+escapeHtml(T.startTime)+' · '+techRound1(sch.totalKm)+' km · '+fmtDur(sch.totalTravel)+' de route · <b>fin estimée '+fmtHM(sch.end)+'</b> · 📋 '+done+'/'+T.stops.length+' devis faits</div>'}));
     sch.rows.forEach(function(row,i){
       var s=row.stop;
       var item=el('div',{class:'itin-row'});
@@ -526,6 +538,33 @@
       c.appendChild(item);
     });
     return c;
+  }
+  function buildFeuilleRoute(){
+    ensureTour(); var T=state.tour, co=state.company, sch=computeSchedule(), seq=orderedStops();
+    var dateStr=T.date?new Date(T.date+'T00:00').toLocaleDateString('fr-BE'):'';
+    var logoHtml=co.logo?'<img src="'+co.logo+'" alt="logo">':'';
+    var html='';
+    html+='<div class="pd-head"><div class="pd-co">'+logoHtml+'<div class="co-name">'+escapeHtml(co.name||'Votre société')+'</div>'+(co.phone?'Tél. '+escapeHtml(co.phone):'')+'</div>'+
+      '<div class="pd-meta"><b>FEUILLE DE ROUTE</b><br>'+dateStr+'<br>Départ '+escapeHtml(T.startTime)+'<br>'+escapeHtml(T.baseAddr||'')+'</div></div>';
+    html+='<div class="pd-section-label">Itinéraire de la journée — '+seq.length+' arrêt(s)</div>';
+    if(!seq.length) html+='<p style="color:#8499a1">Aucun arrêt ordonné. Optimise l’itinéraire d’abord.</p>';
+    else {
+      html+='<table class="pd-table"><thead><tr><th>#</th><th class="r">Arrivée</th><th class="r">Départ</th><th>Client</th><th>Adresse</th><th>Contact</th><th>Statut</th></tr></thead><tbody>';
+      sch.rows.forEach(function(row,i){ var s=row.stop;
+        html+='<tr><td>'+(i+1)+'</td><td class="r">'+fmtHM(row.arrive)+'</td><td class="r">'+fmtHM(row.depart)+'</td>'+
+          '<td>'+escapeHtml(s.name||'')+(s.note?'<br><span style="color:#8499a1">'+escapeHtml(s.note)+'</span>':'')+'</td>'+
+          '<td>'+escapeHtml(s.addr||'')+'</td>'+
+          '<td>'+escapeHtml(s.phone||'')+(s.email?'<br>'+escapeHtml(s.email):'')+'</td>'+
+          '<td>'+escapeHtml(s.status||'')+'</td></tr>';
+      });
+      html+='</tbody></table>';
+      html+='<div class="pd-tot"><div><span>Arrêts</span><span>'+seq.length+'</span></div>'+
+        '<div><span>Distance estimée</span><span>'+techRound1(sch.totalKm)+' km</span></div>'+
+        '<div><span>Temps de route estimé</span><span>'+fmtDur(sch.totalTravel)+'</span></div>'+
+        '<div class="grand"><span>Fin de journée estimée</span><span>'+fmtHM(sch.end)+'</span></div></div>';
+    }
+    html+='<div class="pd-legal">Itinéraire et durées estimés (OSRM ou distance à vol d’oiseau). Horaires indicatifs, susceptibles de varier selon le trafic et la durée réelle des visites.</div>';
+    document.getElementById('printDoc').innerHTML=html;
   }
   function stopRow(s,i){
     var tr=el('tr');
@@ -616,6 +655,8 @@
       var iStatus=el('span',{class:'section-sub',style:'font-size:12.5px'},['']);
       var optB=el('button',{class:'btn primary sm'},['✨ Optimiser l’itinéraire']); optB.addEventListener('click',function(){ optimizeAndRoute(iStatus); });
       irow.appendChild(optB);
+      var frB=el('button',{class:'btn subtle sm'},['🖨 Feuille de route (PDF)']); frB.addEventListener('click',function(){ buildFeuilleRoute(); window.print(); });
+      irow.appendChild(frB);
       irow.appendChild(numField('Vitesse moyenne (km/h)', T.avgKmh, '5', function(v){ T.avgKmh=Math.max(5,+v||50); if(!T.routeGeo) computeLegsHaversine(); save(); refreshItin(); }));
       irow.appendChild(iStatus);
       ip.appendChild(irow);
@@ -897,8 +938,15 @@
     saveBtn.addEventListener('click',function(){
       var t=computeTotals();
       var num=state.company.quotePrefix+String(state.settings.quoteCounter).padStart(4,'0');
-      state.savedQuotes.unshift({id:UID(), name:nameInp.value||(state.quote.client.name||'Devis')+' – '+num, number:num, date:new Date().toLocaleDateString('fr-BE'), total:t.tvac, status:'brouillon', data:JSON.parse(JSON.stringify(state.quote))});
+      var sqId=UID();
+      state.savedQuotes.unshift({id:sqId, name:nameInp.value||(state.quote.client.name||'Devis')+' – '+num, number:num, date:new Date().toLocaleDateString('fr-BE'), total:t.tvac, status:'brouillon', data:JSON.parse(JSON.stringify(state.quote))});
       state.settings.quoteCounter++;
+      // boucle tournée : si ce devis a été lancé depuis un arrêt, le lier et le marquer « devis fait »
+      if(state.tour && state.tour.activeStopId){
+        var st=(state.tour.stops||[]).filter(function(x){return x.id===state.tour.activeStopId;})[0];
+        if(st){ st.devisId=sqId; st.status='devis fait'; }
+        state.tour.activeStopId=null;
+      }
       nameInp.value=''; save(); render();
     });
     row.appendChild(nameInp); row.appendChild(saveBtn);
