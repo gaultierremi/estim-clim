@@ -185,10 +185,61 @@
     if(s.tourMsg) d.tourMsg = Object.assign(newTourMsg(), s.tourMsg);
     return d;
   }
-  // Jeu de démo minimal (étendu en Partie B). Société manifestement fictive.
+  // Jeu de démo : données fictives réalistes (clim Belgique), prix ronds clairement faux,
+  // champs techniques remplis pour démontrer AR + module technique. Aucune vraie donnée client.
   function demoSeed(){
     var d=seed();
-    d.company={ name:'DÉMO Climatisation', addr:'Rue de la Démo 1, 4000 Liège', phone:'04 000 00 00', email:'demo@exemple.be', vatNr:'BE 0000.000.000 — DÉMO', logo:null, validity:30, quotePrefix:'DEMO-2026-', footer:d.company.footer };
+    d.company={ name:'DÉMO Climatisation', addr:'Rue de la Démo 1, 4000 Liège', phone:'04 000 00 00', email:'demo@exemple.be', vatNr:'BE 0000.000.000 — DÉMO', logo:null, validity:30, quotePrefix:'DEMO-2026-', footer:'DÉMO — sans valeur commerciale. Données fictives de démonstration.' };
+    var iM25=UID(), iM35=UID(), iM50=UID(), iCass=UID(), iCons=UID(), oMono=UID(), oMulti=UID();
+    d.catalog=[
+      {id:iM25, brand:'DÉMO', model:'Mural Eco', type:'mural', kw:2.5, energy:'A+++', price:1200, purchasePrice:780, diamLiquide:'1/4', diamGaz:'3/8', liaisonBaseLen:3, liaisonMaxLen:15, denivMax:8, chargeGM:20, disjoncteur:'16 A — à confirmer', goulotteSectionConseillee:'60x45'},
+      {id:iM35, brand:'DÉMO', model:'Mural Confort', type:'mural', kw:3.5, energy:'A+++', price:1500, purchasePrice:980, diamLiquide:'1/4', diamGaz:'3/8', liaisonBaseLen:3, liaisonMaxLen:20, denivMax:10, chargeGM:20, disjoncteur:'16 A — à confirmer', goulotteSectionConseillee:'60x45'},
+      {id:iM50, brand:'DÉMO', model:'Mural Max', type:'mural', kw:5.0, energy:'A++', price:1900, purchasePrice:1250, diamLiquide:'1/4', diamGaz:'1/2', liaisonBaseLen:3, liaisonMaxLen:25, denivMax:12, chargeGM:30, disjoncteur:'20 A — à confirmer', goulotteSectionConseillee:'80x60'},
+      {id:iCass, brand:'DÉMO', model:'Cassette 4 voies', type:'cassette', kw:5.0, energy:'A++', price:2400, purchasePrice:1600, diamLiquide:'1/4', diamGaz:'1/2', liaisonBaseLen:3, liaisonMaxLen:25, denivMax:15, chargeGM:30, goulotteSectionConseillee:'80x60'},
+      {id:iCons, brand:'DÉMO', model:'Console', type:'console', kw:3.5, energy:'A++', price:1700, purchasePrice:1150, diamLiquide:'1/4', diamGaz:'3/8', liaisonBaseLen:3, liaisonMaxLen:20, denivMax:10, chargeGM:20, goulotteSectionConseillee:'60x45'}
+    ];
+    d.outdoors=[
+      {id:oMono, brand:'DÉMO', model:'Mono 3.5', kw:3.5, ports:1, price:1100, purchasePrice:720, denivMax:10, disjoncteur:'20 A — à confirmer'},
+      {id:oMulti, brand:'DÉMO', model:'Multi 8 — 4 sorties', kw:8.0, ports:4, price:2600, purchasePrice:1750, denivMax:15, disjoncteur:'25 A — à confirmer'}
+    ];
+    d.labour.pose={mural:300, console:350, cassette:500, gainable:600};
+    d.labour.miseEnService=120; d.labour.liaisonPerM=40; d.labour.liaisonDefaultM=5; d.labour.diversPct=8;
+    d.labour.techPrices={goulotteM:15, carottage:30, pompe:200, evacM:8, support:40, elecM:12};
+    d.extras=[ {id:UID(),name:'Dépose ancien appareil',price:120}, {id:UID(),name:'Pompe de relevage',price:200}, {id:UID(),name:'Cache-liaison décoratif (par m)',price:20}, {id:UID(),name:'Mise en service',price:120} ];
+    d.finance.acomptePct=30; d.finance.simRate=4.9; d.finance.simMonths=48;
+    d.settings.vat=6; d.settings.quoteCounter=4; d.settings.marginMinPct=25;
+    d.savings={fossilPrice:0.11, fossilEff:0.9, pacPrice:0.30, scop:4.0};
+    // Devis d'exemple (clim air-air → prime 0, TVA 6 %)
+    d.quote=newQuote();
+    d.quote.client={name:'Client Démo', addr:'Place Saint-Lambert 1, 4000 Liège', phone:'04 000 11 22', email:'client.demo@exemple.be'};
+    d.quote.rooms=[ Object.assign(newRoom('Séjour'),{surface:32, productId:iM35}), Object.assign(newRoom('Chambre'),{surface:14, productId:iM25}) ];
+    d.quote.compare={oldAnnual:1400, newAnnual:650};
+    ensureQuoteTech(d.quote);
+    d.quote.rooms[0].tech.liaisonLen=6; d.quote.rooms[0].tech.deniv=2; d.quote.rooms[0].tech.trouNb=1; d.quote.rooms[0].tech.condensats='pompe'; d.quote.rooms[0].tech.evacLen=3;
+    d.quote.rooms[1].tech.liaisonLen=4; d.quote.rooms[1].tech.deniv=1; d.quote.rooms[1].tech.trouNb=1;
+    // Plan dessiné : 2 pièces + 1 pièce en L (AR5) + unités posées
+    d.plan=newPlan(); d.plan.wcm=1200; d.plan.hcm=800;
+    d.plan.rooms=[
+      {id:UID(),x:60,y:60,w:420,h:320,name:'Séjour'},
+      {id:UID(),x:540,y:60,w:280,h:240,name:'Chambre'},
+      {id:UID(),x:60,y:440,w:400,h:300,name:'Pièce en L', poly:[{x:0,y:0},{x:400,y:0},{x:400,y:180},{x:200,y:180},{x:200,y:300},{x:0,y:300}], areaM2:9.6}
+    ];
+    d.plan.items=[
+      {id:UID(),type:'mural', x:240, y:70, rot:0, productId:iM35},
+      {id:UID(),type:'mural', x:620, y:70, rot:0, productId:iM25},
+      {id:UID(),type:'outdoor', x:900, y:640, rot:0, productId:oMulti}
+    ];
+    // Devis enregistrés (statuts variés → pipeline + stats)
+    function mkSaved(name,num,total,status,daysAgo){ var q=newQuote(); q.client.name=name; return {id:UID(), name:name, number:'DEMO-2026-'+num, date:new Date(Date.now()-daysAgo*864e5).toLocaleDateString('fr-BE'), total:total, status:status, validityDays:30, relance:false, data:q}; }
+    d.savedQuotes=[ mkSaved('Dupont — séjour','0001',4200,'accepte',10), mkSaved('Martin — 3 splits','0002',7800,'envoye',20), mkSaved('Lefèvre — studio','0003',2600,'brouillon',2) ];
+    // Tournée d'exemple : adresses publiques de Liège (aucun vrai client)
+    d.tour=newTour(); d.tour.baseAddr='Place Saint-Lambert, 4000 Liège'; d.tour.baseLatLng={lat:50.6451,lng:5.5734};
+    function dstop(name,addr,lat,lng){ var s=newStop({name:name,addr:addr}); s.latLng={lat:lat,lng:lng}; return s; }
+    d.tour.stops=[
+      dstop('Visite — Cathédrale','Place de la Cathédrale, 4000 Liège',50.6419,5.5723),
+      dstop('Visite — Guillemins','Rue des Guillemins, 4000 Liège',50.6244,5.5666),
+      dstop('Visite — Médiacité','Boulevard Raymond Poincaré, 4020 Liège',50.6300,5.5870)
+    ];
     return d;
   }
   function refreshDemoUI(){ try{ document.body.classList.toggle('demo-mode', isDemo()); }catch(e){} }
