@@ -947,7 +947,7 @@
       msg = 'Unité conseillée : <b>'+fmtKw(c.reco)+'</b>'+(c.kW>7.1?' — pièce volumineuse, envisager 2 unités/gainable.':'');
     }
     card._reco.innerHTML = msg;
-    if(card._dsHost){ card._dsHost.innerHTML=''; var dl=datasheetLink(p); if(dl) card._dsHost.appendChild(dl); }
+    if(card._dsHost){ card._dsHost.innerHTML=''; var th=productThumb(p,48); if(th){ th.style.cssText+=';margin-right:8px;vertical-align:middle'; card._dsHost.appendChild(th); } var dl=datasheetLink(p); if(dl) card._dsHost.appendChild(dl); }
     card._bd.textContent = (+r.surface||0)+' m² × '+c.base+' W/m² × expo '+c.oriF+' × vitrage '+c.glzF + (c.roofF>1?' × toiture '+c.roofF:'') + (c.heightF>1?' × h '+c.heightF.toFixed(2):'') + (c.occ>0?' + '+c.occ+'W occ.':'') + (c.charge>0?' + '+c.charge+'W charges':'');
   }
   function datasheetLink(prod){
@@ -1272,10 +1272,25 @@
     cell.appendChild(el('div',{class:'banner info',style:'margin-bottom:10px',html:'<div>Données techniques du modèle (optionnelles). Le disjoncteur conseillé est une <b>note à confirmer par l’électricien</b> ; la charge de réfrigérant déduite reste une estimation à confirmer et peser par l’installateur certifié.</div>'}));
     var g=el('div',{class:'grid g3',style:'gap:10px'});
     defs.forEach(function(d){ g.appendChild(modelTechField(obj,d)); });
-    cell.appendChild(g); tr.appendChild(cell);
+    cell.appendChild(g);
+    cell.appendChild(productPhotoField(obj));
+    tr.appendChild(cell);
     tr.style.display='none';
     return tr;
   }
+  function productPhotoField(prod){
+    var wrap=el('div',{style:'margin-top:12px'});
+    wrap.appendChild(el('span',{style:'display:block; font-size:11.5px; font-weight:600; color:var(--muted); margin-bottom:6px'},['Photo du produit (sélection, vue client, fiche)']));
+    if(prod.photo) wrap.appendChild(el('img',{src:prod.photo, style:'height:80px; object-fit:contain; border-radius:8px; border:1px solid var(--line); background:#fff'}));
+    var file=el('input',{type:'file', accept:'image/*', style:'display:none'});
+    var btn=el('button',{class:'btn subtle sm', type:'button', style:'margin-top:8px'},[prod.photo?'Remplacer la photo':'📷 Ajouter une photo']);
+    btn.addEventListener('click',function(){ file.click(); });
+    file.addEventListener('change',function(){ var f=file.files[0]; if(!f) return; downscaleImage(f, 800, 0.7, function(d){ prod.photo=d; save(); render(); }); });
+    wrap.appendChild(btn); wrap.appendChild(file);
+    if(prod.photo){ var rm=el('button',{class:'btn danger sm', type:'button', style:'margin-top:8px; margin-left:8px'},['Retirer']); rm.addEventListener('click',function(){ prod.photo=null; save(); render(); }); wrap.appendChild(rm); }
+    return wrap;
+  }
+  function productThumb(prod, h){ if(!prod||!prod.photo) return null; return el('img',{src:prod.photo, style:'height:'+(h||44)+'px; width:auto; object-fit:contain; border-radius:6px; border:1px solid var(--line); background:#fff'}); }
   function techToggleCell(getDefs, getColspan, hostObj){
     var detailsTr=null;
     var b=el('button',{class:'btn subtle sm',type:'button'},['⚙ Tech']);
@@ -1963,6 +1978,9 @@
         body.appendChild(roiBox);
       }
     }
+    var gal=el('div',{class:'cv-legend'}); var galSeen={};
+    q.rooms.forEach(function(r){ var p=getProduct(r.productId); if(p && p.photo && !galSeen[p.id]){ galSeen[p.id]=1; var cell=el('div',{class:'cv-leg'}); var th=productThumb(p,40); if(th) cell.appendChild(th); cell.appendChild(document.createTextNode(p.brand+' '+p.model+' '+fmtKw(p.kw))); gal.appendChild(cell); } });
+    if(gal.children.length){ body.appendChild(el('div',{class:'total-label',style:'margin-top:16px'},['Produits proposés'])); body.appendChild(gal); }
     var dsList=el('div',{class:'cv-legend'}); var dsSeen={};
     q.rooms.forEach(function(r){ var p=getProduct(r.productId); if(p && p.datasheet && !dsSeen[p.id]){ dsSeen[p.id]=1; var dl=datasheetLink(p); if(dl){ dl.textContent='📄 '+p.brand+' '+p.model; dsList.appendChild(dl); } } });
     if(dsList.children.length){ body.appendChild(el('div',{class:'total-label',style:'margin-top:16px'},['Fiches techniques'])); body.appendChild(dsList); }
@@ -2333,9 +2351,10 @@
       html+='</tbody></table>';
       html+='<div class="fp-drill">⚠ Avant perçage : vérifier l’absence de câbles électriques, canalisations et éléments de structure.</div>';
       var ph=photoForRoom(r);
-      if(tech.elevation || ph){
+      if(tech.elevation || ph || (prod&&prod.photo)){
         html+='<div class="fp-media">';
         if(tech.elevation) html+='<div class="fp-elev">'+elevationSVGString(tech.elevation)+'<div class="fp-cote">h sous unité '+techRound1(tech.elevation.hauteurSousUnite)+' m · trou '+techRound1(tech.elevation.hauteurTrou)+' m · goulotte '+techRound1(tech.elevation.goulotteLenElev)+' m</div></div>';
+        if(prod&&prod.photo) html+='<div class="fp-photo"><img src="'+prod.photo+'" alt="produit"></div>';
         if(ph) html+='<div class="fp-photo"><img src="'+ph+'" alt="photo de la pièce"></div>';
         html+='</div>';
       }
