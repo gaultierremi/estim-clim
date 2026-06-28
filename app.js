@@ -2417,6 +2417,7 @@
     });
     var ex=v.existing||{}; var exParts=[ex.marque,ex.modele,ex.type,ex.annee].filter(Boolean);
     if(exParts.length) rows.push('<tr><td class="fp-k">Unité remplacée</td><td>'+escapeHtml(exParts.join(' · '))+'</td></tr>');
+    if(v.notes) rows.push('<tr><td class="fp-k">Notes</td><td>'+escapeHtml(v.notes).replace(/\n/g,'<br>')+'</td></tr>');
     if(!rows.length) return '';
     return '<div class="pd-section-label">Relevé de visite</div><table class="pd-table fp-table"><tbody>'+rows.join('')+'</tbody></table>';
   }
@@ -2587,6 +2588,8 @@
     ge.appendChild(extxt('Type','type','ex. mural, console'));
     ge.appendChild(extxt('Année','annee','ex. 2009'));
     p.appendChild(ge);
+    var nta=el('textarea',{style:'min-height:70px'}); nta.value=v.notes||''; nta.addEventListener('input',function(){ v.notes=nta.value; save(); });
+    p.appendChild(el('label',{class:'field',style:'margin-top:14px'},[el('span',null,['Notes rapides (client / visite)']), nta]));
     c.appendChild(p); return c;
   }
   function selFieldV(label,val,options,on){ var s=el('select'); options.forEach(function(o){ s.appendChild(opt(o[0],o[1],o[0]===val)); }); s.addEventListener('change',function(){on(s.value);}); return el('label',{class:'field'},[el('span',null,[label]),s]); }
