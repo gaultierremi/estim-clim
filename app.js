@@ -1106,7 +1106,7 @@
       var t=computeTotals();
       var num=state.company.quotePrefix+String(state.settings.quoteCounter).padStart(4,'0');
       var sqId=UID();
-      state.savedQuotes.unshift({id:sqId, name:nameInp.value||(state.quote.client.name||'Devis')+' – '+num, number:num, date:new Date().toLocaleDateString('fr-BE'), total:t.tvac, status:'brouillon', data:JSON.parse(JSON.stringify(state.quote))});
+      state.savedQuotes.unshift({id:sqId, name:nameInp.value||(state.quote.client.name||'Devis')+' – '+num, number:num, date:new Date().toLocaleDateString('fr-BE'), total:t.tvac, status:'brouillon', validityDays:(parseInt(state.company.validity,10)||30), relance:false, data:JSON.parse(JSON.stringify(state.quote))});
       state.settings.quoteCounter++;
       // boucle tournée : si ce devis a été lancé depuis un arrêt, le lier et le marquer « devis fait »
       if(state.tour && state.tour.activeStopId){
@@ -2618,6 +2618,39 @@
      TABLEAU DE BORD
      ============================================================ */
   var DASH_STATUS=[['brouillon','Brouillon','#8499a1'],['envoye','Envoyé','#0e9aa8'],['accepte','Accepté','#2f8f5b'],['perdu','Perdu','#bf4631']];
+  function parseSavedDate(s){ var m=String(s||'').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/); if(m) return new Date(+m[3], +m[2]-1, +m[1]); var d=new Date(s); return isNaN(d)?null:d; }
+  function quoteDueInfo(q){
+    var d=parseSavedDate(q.date); if(!d) return null;
+    var days=(q.validityDays!=null?+q.validityDays:(parseInt(state.company.validity,10)||30));
+    var due=new Date(d.getTime()+days*864e5), today=new Date(); today.setHours(0,0,0,0);
+    return {due:due, daysLeft:Math.round((due-today)/864e5)};
+  }
+  function relanceQuotes(){
+    return state.savedQuotes
+      .filter(function(q){ var s=q.status||'brouillon'; return s!=='accepte' && s!=='perdu'; })
+      .map(function(q){ var info=quoteDueInfo(q); return info?{q:q, daysLeft:info.daysLeft, due:info.due}:null; })
+      .filter(function(x){ return x && x.daysLeft<=7; })
+      .sort(function(a,b){ return a.daysLeft-b.daysLeft; });
+  }
+  function buildRelancesCard(){
+    var list=relanceQuotes();
+    var c=el('div',{class:'card',style:'margin-top:20px'}); var p=el('div',{class:'pad'});
+    p.appendChild(el('div',{class:'eyebrow'},['Pense-bête']));
+    p.appendChild(el('h2',{class:'section-title',style:'font-size:15px; margin-bottom:6px'},['Relances à faire ('+list.length+')']));
+    p.appendChild(el('p',{class:'section-sub'},['Devis non acceptés à échéance (≤ 7 j) ou échus. Rappel manuel — aucun envoi automatique.']));
+    if(!list.length){ p.appendChild(el('p',{class:'section-sub',style:'margin-top:8px'},['Rien à relancer pour l’instant.'])); c.appendChild(p); return c; }
+    list.forEach(function(x){
+      var q=x.q, item=el('div',{class:'saved-item'});
+      var dueStr=x.daysLeft<0 ? ('échu depuis '+(-x.daysLeft)+' j') : (x.daysLeft===0?'échoit aujourd’hui':('J-'+x.daysLeft));
+      var meta=el('div',{class:'meta'},[el('b',null,[q.name]), el('span',{style:x.daysLeft<0?'color:var(--danger)':'color:var(--warm)'},[dueStr+' · '+euro.format(q.total)+(q.relance?' · ✓ relancé':'')])]);
+      var tg=el('button',{class:'btn subtle sm'},[q.relance?'Annuler relance':'Marquer relancé']);
+      tg.addEventListener('click',function(){ q.relance=!q.relance; save(); render(); });
+      var open=el('button',{class:'btn subtle sm'},['Ouvrir']); open.addEventListener('click',function(){ state.quote=ensureQuoteTech(JSON.parse(JSON.stringify(q.data))); state.ui.tab='devis'; save(); render(); });
+      item.appendChild(meta); item.appendChild(tg); item.appendChild(open);
+      p.appendChild(item);
+    });
+    c.appendChild(p); return c;
+  }
   function renderDash(){
     var box=el('div');
     box.appendChild(el('div',{class:'eyebrow'},['Pilotage']));
@@ -2637,6 +2670,7 @@
       DASH_STATUS.forEach(function(s){ leg.appendChild(el('span',null,['■ '+s[1]+' · '+euro.format(totals[s[0]])])); });
       box.appendChild(leg);
     }
+    box.appendChild(buildRelancesCard());
     var c=el('div',{class:'card',style:'margin-top:20px'}); var p=el('div',{class:'pad'});
     p.appendChild(el('h2',{class:'section-title',style:'font-size:15px; margin-bottom:6px'},['Devis enregistrés']));
     if(state.savedQuotes.length===0) p.appendChild(el('p',{class:'section-sub'},['Aucun devis mémorisé. Enregistre un devis depuis l\u2019onglet Devis pour le suivre ici.']));
