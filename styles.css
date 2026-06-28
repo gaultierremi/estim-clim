@@ -292,3 +292,38 @@
 
   /* Mode lecture seule (lien partagé) : on masque toute l'édition */
   .shared-mode .tabs, .shared-mode #exportBtn, .shared-mode #importBtn, .shared-mode #printBtn, .shared-mode #saveState, .shared-mode .foot-note{ display:none !important }
+
+  /* ============================================================
+     RESPONSIVE (mobile / tablette) — présentation uniquement
+     ============================================================ */
+  /* Aucun média ne dépasse son conteneur */
+  img, canvas, .leaflet-container{ max-width:100% }
+  .leaflet-container{ border-radius:var(--radius) }
+  /* L'éditeur de plan SVG s'adapte à la largeur (viewBox conserve l'aspect ; le drag reste juste via getScreenCTM) */
+  .plan-svg{ max-width:100%; height:auto }
+
+  /* En-tête : la barre d'onglets défile horizontalement, les actions s'enroulent */
+  @media (max-width:820px){
+    .head-row{ flex-wrap:wrap; gap:8px 6px; padding:10px 12px }
+    .head-spacer{ display:none }
+    #saveState{ display:none }
+    .logo{ flex:1 1 auto }
+    .tabs{ order:5; flex-basis:100%; width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; flex-wrap:nowrap }
+    .tabs::-webkit-scrollbar{ display:none }
+    .tabs{ scrollbar-width:none }
+    .tabs button{ flex:0 0 auto }
+  }
+
+  /* Téléphone : empilement, cibles tactiles ≥ ~44 px, inputs 16 px (pas de zoom auto iOS) */
+  @media (max-width:640px){
+    main{ padding:16px 12px 120px }
+    input, select, textarea{ font-size:16px }
+    table.tbl input, table.tbl select{ font-size:16px }
+    .btn{ padding:11px 14px } .btn.sm{ padding:9px 12px }
+    .planbtn{ padding:10px 12px }
+    .cbtn{ min-width:40px; height:40px }
+    .cv-head{ flex-direction:column } .cv-head .meta{ text-align:left }
+    .itin-row{ flex-wrap:wrap } .itin-ctrl{ width:100%; justify-content:flex-start; margin-top:4px }
+    .home-title{ font-size:24px }
+    .share-panel{ max-width:none; width:min(560px, 92vw) }
+  }

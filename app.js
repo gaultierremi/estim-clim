@@ -277,6 +277,8 @@
     document.getElementById('tab-dash').setAttribute('aria-selected', state.ui.tab==='dash');
     document.getElementById('tab-admin').setAttribute('aria-selected', state.ui.tab==='admin');
     document.getElementById('printBtn').style.display = (state.ui.tab==='devis'||state.ui.tab==='plan') ? '' : 'none';
+    // garder l'onglet actif visible quand la barre défile (mobile)
+    try{ var at=document.querySelector('.tabs button[aria-selected=true]'); if(at && at.scrollIntoView) at.scrollIntoView({inline:'center', block:'nearest'}); }catch(e){}
   }
 
   /* ============================================================
@@ -641,7 +643,7 @@
       var gBtn=el('button',{class:'btn primary sm'},['🌍 Géocoder les adresses']);
       gBtn.addEventListener('click',function(){ geocodeAll(gStatus, gBtn); });
       grow.appendChild(gBtn); grow.appendChild(gStatus); gp.appendChild(grow);
-      var mapWrap=el('div',{id:'tourMap', style:'height:380px;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:#eef2f3'});
+      var mapWrap=el('div',{id:'tourMap', style:'height:min(60vh,460px);min-height:300px;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:#eef2f3'});
       gp.appendChild(mapWrap);
       gp.appendChild(el('div',{style:'font-size:11px;color:var(--muted);margin-top:6px'},['Carte © OpenStreetMap. Géocodage Nominatim — usage modéré (1 requête/seconde).']));
       gc.appendChild(gp); box.appendChild(gc);
