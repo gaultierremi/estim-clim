@@ -1822,14 +1822,18 @@
   function buildRoomNode(room){
     var sel=isSel('room',room.id);
     var g=svgN('g',{'data-id':room.id, style:'cursor:move'});
-    var rect=svgN('rect',{rx:6,fill:'#ffffff',stroke:sel?'#0e9aa8':'#9fb6bd','stroke-width':sel?3:1.6});
+    var isPoly=!!(room.poly && room.poly.length>=3);
+    var shape=isPoly ? svgN('polygon',{fill:'#ffffff',stroke:sel?'#0e9aa8':'#9fb6bd','stroke-width':sel?3:1.6})
+                     : svgN('rect',{rx:6,fill:'#ffffff',stroke:sel?'#0e9aa8':'#9fb6bd','stroke-width':sel?3:1.6});
     var t=svgN('text',{'font-size':16,fill:'#5e727c','font-weight':600});
     var dim=svgN('text',{'text-anchor':'end','font-size':13,fill:'#9fb6bd'});
-    g.appendChild(rect); g.appendChild(t); g.appendChild(dim);
-    g._apply=function(){ rect.setAttribute('x',room.x);rect.setAttribute('y',room.y);rect.setAttribute('width',room.w);rect.setAttribute('height',room.h);
+    g.appendChild(shape); g.appendChild(t); g.appendChild(dim);
+    g._apply=function(){
+      if(isPoly){ shape.setAttribute('points', room.poly.map(function(p){return (room.x+p.x)+','+(room.y+p.y);}).join(' ')); }
+      else { shape.setAttribute('x',room.x);shape.setAttribute('y',room.y);shape.setAttribute('width',room.w);shape.setAttribute('height',room.h); }
       t.setAttribute('x',room.x+8);t.setAttribute('y',room.y+20); t.textContent=room.name;
       dim.setAttribute('x',room.x+room.w-8);dim.setAttribute('y',room.y+room.h-8);
-      dim.textContent=(room.w/100).toFixed(1).replace('.',',')+'×'+(room.h/100).toFixed(1).replace('.',',')+' m'; };
+      dim.textContent=isPoly ? ((room.areaM2!=null?room.areaM2.toString().replace('.',','):'?')+' m² (est.)') : ((room.w/100).toFixed(1).replace('.',',')+'×'+(room.h/100).toFixed(1).replace('.',',')+' m'); };
     g._apply(); attachDrag(g,room,'room'); return g;
   }
 
@@ -1952,7 +1956,12 @@
     s+='<rect x="0" y="0" width="'+P.wcm+'" height="'+P.hcm+'" fill="url(#cvgrid)"/>';
     s+='<rect x="1" y="1" width="'+(P.wcm-2)+'" height="'+(P.hcm-2)+'" fill="none" stroke="#dce5e8" stroke-width="2"/>';
     P.rooms.forEach(function(r){
-      s+='<rect x="'+r.x+'" y="'+r.y+'" width="'+r.w+'" height="'+r.h+'" rx="6" fill="#ffffff" stroke="#9fb6bd" stroke-width="1.6"/>';
+      if(r.poly && r.poly.length>=3){
+        var pts=r.poly.map(function(p){return (r.x+p.x)+','+(r.y+p.y);}).join(' ');
+        s+='<polygon points="'+pts+'" fill="#ffffff" stroke="#9fb6bd" stroke-width="1.6"/>';
+      } else {
+        s+='<rect x="'+r.x+'" y="'+r.y+'" width="'+r.w+'" height="'+r.h+'" rx="6" fill="#ffffff" stroke="#9fb6bd" stroke-width="1.6"/>';
+      }
       s+='<text x="'+(r.x+8)+'" y="'+(r.y+20)+'" font-size="16" font-weight="600" fill="#5e727c">'+escapeHtml(r.name)+'</text>';
       s+='<text x="'+(r.x+r.w-8)+'" y="'+(r.y+r.h-8)+'" text-anchor="end" font-size="13" fill="#9fb6bd">'+((r.w/100).toFixed(1).replace('.',',')+'×'+(r.h/100).toFixed(1).replace('.',',')+' m')+'</text>';
     });
@@ -2969,8 +2978,9 @@
       var w=Math.max.apply(null,xs)-Math.min.apply(null,xs);
       var d=Math.max.apply(null,zs)-Math.min.apply(null,zs);
       var area=polyArea(points);
-      var onMeasured = opts.onMeasured || function(w,d,area){ createRoomFromMeasure(w,d,area); };
-      pendingAfter=function(){ onMeasured(w,d,area); };
+      var poly=points.map(function(p){ return {x:p.x, z:p.z}; }); // AR5 : polygone réel (pièce en L)
+      var onMeasured = opts.onMeasured || function(w,d,area,poly){ createRoomFromMeasure(w,d,area,poly); };
+      pendingAfter=function(){ onMeasured(w,d,area,poly); };
       try{ if(session) session.end(); }catch(e){ cleanup(); if(pendingAfter) pendingAfter(); }
     }
 
@@ -3014,28 +3024,37 @@
     }
   }
 
-  function addRoomGeometryFromMeasure(wMeters, dMeters, areaM2){
+    // AR5 : construit le polygone (cm, relatif à room.x/y) depuis les points mesurés (m, monde)
+  function polyFromMeasure(poly){
+    if(!poly || poly.length<3) return null;
+    var xs=poly.map(function(p){return p.x;}), zs=poly.map(function(p){return p.z;});
+    var minx=Math.min.apply(null,xs), minz=Math.min.apply(null,zs);
+    return poly.map(function(p){ return { x:snap(Math.round((p.x-minx)*100)), y:snap(Math.round((p.z-minz)*100)) }; });
+  }
+  function addRoomGeometryFromMeasure(wMeters, dMeters, areaM2, poly){
     var wcm=Math.max(50, Math.round(wMeters*100)), hcm=Math.max(50, Math.round(dMeters*100));
     var x=40, y=40; state.plan.rooms.forEach(function(r){ y=Math.max(y, r.y+r.h+40); });
     var room={ id:UID(), x:snap(x), y:snap(y), w:snap(wcm), h:snap(hcm), name:'Pièce AR ('+areaM2.toFixed(1).replace('.',',')+' m²)' };
+    var pr=polyFromMeasure(poly); if(pr){ room.poly=pr; room.areaM2=Math.round(areaM2*10)/10; }
     if(room.x+room.w > state.plan.wcm) state.plan.wcm=Math.ceil((room.x+room.w+40)/50)*50;
     if(room.y+room.h > state.plan.hcm) state.plan.hcm=Math.ceil((room.y+room.h+40)/50)*50;
     state.plan.rooms.push(room);
     return room;
   }
-  function createRoomFromMeasure(wMeters, dMeters, areaM2){
-    var room=addRoomGeometryFromMeasure(wMeters, dMeters, areaM2);
+  function createRoomFromMeasure(wMeters, dMeters, areaM2, poly){
+    var room=addRoomGeometryFromMeasure(wMeters, dMeters, areaM2, poly);
     state.ui.planSel={kind:'room', id:room.id}; state.ui.tab='plan'; save(); render();
-    setTimeout(function(){ alert('Pièce mesurée ajoutée au plan : '+wMeters.toFixed(2).replace('.',',')+' × '+dMeters.toFixed(2).replace('.',',')+' m, surface ≈ '+areaM2.toFixed(1).replace('.',',')+' m².\n\nLa pièce est approximée en rectangle — ajuste-la si elle est en L. Reporte la surface dans le devis pour le dimensionnement.'); },250);
+    var shape = room.poly ? ('polygone à '+room.poly.length+' sommets (pièce en L gérée)') : 'rectangle (ajuste si la pièce est en L)';
+    setTimeout(function(){ alert('Pièce mesurée ajoutée au plan : surface ≈ '+areaM2.toFixed(1).replace('.',',')+' m² — '+shape+'.\n\nSurface = estimation (profondeur ARCore, non certifiée). Reporte-la dans le devis pour le dimensionnement.'); },250);
   }
 
   // Fin de la phase mesure du flux « Scanner & équiper » : dimensionne, suggère un modèle,
   // ajoute pièce + unité au plan, puis propose de poser l'unité sur le mur en AR.
-  function arScanEquipMeasured(wMeters, dMeters, areaM2){
+  function arScanEquipMeasured(wMeters, dMeters, areaM2, poly){
     var tmp=newRoom('AR'); tmp.surface=areaM2;        // mêmes hypothèses par défaut que le devis
     var rc=computeRoom(tmp);                            // un seul moteur de charge
     var sug=suggestIndoorForAR(rc.reco);
-    var room=addRoomGeometryFromMeasure(wMeters, dMeters, areaM2);
+    var room=addRoomGeometryFromMeasure(wMeters, dMeters, areaM2, poly);
     var type=(sug.product && PLAN_ITEMS[sug.product.type]) ? sug.product.type : 'mural';
     var mm=PLAN_ITEMS[type];
     var ix=clamp(snap(room.x+room.w/2-mm.w/2),0,maxX({type:type},'item'));
