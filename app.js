@@ -46,8 +46,20 @@
       quote: newQuote(),
       plan: newPlan(),
       savedQuotes:[],
+      tour: newTour(),
       ui:{ tab:'home', adminSection:'societe', clientPrices:true, clientView:false, planSel:null }
     };
+  }
+  function newTour(){ return { date:new Date().toISOString().slice(0,10), startTime:'08:30', baseAddr:'', baseLatLng:null, defaultVisitMin:45, avgKmh:50, stops:[], order:[], legs:[] }; }
+  function newStop(o){ o=o||{}; return { id:UID(), name:o.name||'', addr:o.addr||'', phone:o.phone||'', email:o.email||'', note:o.note||'', latLng:null, visitMin:null, status:'à contacter', devisId:null }; }
+  function ensureTour(){
+    if(!state.tour || typeof state.tour!=='object') state.tour=newTour();
+    var d=newTour(); for(var k in d){ if(state.tour[k]==null) state.tour[k]=d[k]; }
+    if(!Array.isArray(state.tour.stops)) state.tour.stops=[];
+    if(!Array.isArray(state.tour.order)) state.tour.order=[];
+    if(!Array.isArray(state.tour.legs)) state.tour.legs=[];
+    state.tour.stops.forEach(function(s){ var n=newStop(); for(var kk in n){ if(s[kk]===undefined) s[kk]=n[kk]; } });
+    return state.tour;
   }
   function newQuote(){
     return {
@@ -128,6 +140,7 @@
     if(s.savings) d.savings=Object.assign(d.savings,s.savings);
     if(Array.isArray(s.savedQuotes)) d.savedQuotes = s.savedQuotes;
     d.savedQuotes.forEach(function(sq){ if(sq && sq.data) ensureQuoteTech(sq.data); });
+    if(s.tour) d.tour = Object.assign(newTour(), s.tour);
     return d;
   }
   var saveTimer;
@@ -284,11 +297,121 @@
     box.appendChild(foot);
     return box;
   }
+  /* ---- Parser de leads (heuristique, faillible → tableau de confirmation) ---- */
+  var RE_EMAIL=/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/;
+  var RE_PHONE=/(?:\+32|0032|0)[\s.\-]?\d(?:[\s.\-]?\d){7,9}/;
+  var RE_CP=/\b\d{4}\b/;
+  var LEAD_LABELS=/^(nom|client|name|contact|adresse|adr|rue|address|domicile|t[ée]l|tel|gsm|phone|mobile|portable|t[ée]l[ée]phone|mail|email|courriel|e-mail)\b/i;
+  function leadFieldByLabel(lines, keys){
+    for(var i=0;i<lines.length;i++){
+      var m=lines[i].match(/^([A-Za-zÀ-ÿ'’ .]{2,22})\s*[:：]\s*(.+)$/);
+      if(m){ var key=m[1].toLowerCase().trim(); for(var k=0;k<keys.length;k++){ if(key.indexOf(keys[k])>=0) return m[2].trim(); } }
+    }
+    return '';
+  }
+  function parseLeadBlock(block){
+    var lines=block.split('\n').map(function(l){return l.trim();}).filter(Boolean);
+    if(lines.length===1 && (lines[0].match(/,/g)||[]).length>=2) lines=lines[0].split(',').map(function(x){return x.trim();}).filter(Boolean);
+    var joined=lines.join('\n');
+    var email=leadFieldByLabel(lines,['mail','courriel']) || (joined.match(RE_EMAIL)||[])[0] || '';
+    var em=email.match(RE_EMAIL); email=em?em[0]:'';
+    var phone=leadFieldByLabel(lines,['tél','tel','gsm','phone','mobile','portable']) || (joined.match(RE_PHONE)||[])[0] || '';
+    var pm=phone.match(RE_PHONE); phone=pm?pm[0].replace(/[\s.\-]+/g,' ').trim():'';
+    var name=leadFieldByLabel(lines,['nom','client','name','contact']);
+    if(!name){ var titled=lines.filter(function(l){return /^(m\.|mme|mr|monsieur|madame)\b/i.test(l);})[0]; if(titled) name=titled; }
+    if(!name){ for(var j=0;j<lines.length;j++){ var l=lines[j]; if(RE_EMAIL.test(l)||RE_PHONE.test(l)||RE_CP.test(l)) continue; if(LEAD_LABELS.test(l)) continue; name=l; break; } }
+    var addr=leadFieldByLabel(lines,['adresse','adr','rue','address','domicile']);
+    if(!addr){ for(var i=0;i<lines.length;i++){ if(RE_CP.test(lines[i]) && !RE_EMAIL.test(lines[i])){ addr=lines[i];
+      if(i>0){ var prev=lines[i-1]; if(prev!==name && !RE_EMAIL.test(prev) && !RE_PHONE.test(prev) && !RE_CP.test(prev) && !LEAD_LABELS.test(prev) && /\d/.test(prev)) addr=prev+', '+addr; }
+      break; } } }
+    var note=lines.filter(function(l){
+      if(l===name||l===addr) return false;
+      if(RE_EMAIL.test(l)||RE_PHONE.test(l)||RE_CP.test(l)) return false;
+      if(LEAD_LABELS.test(l) && /[:：]/.test(l)) return false;
+      return true;
+    }).join(' · ');
+    return newStop({name:name, addr:addr, phone:phone, email:email, note:note});
+  }
+  function splitLeadBlocks(text){
+    text=String(text||'').replace(/\r/g,'').trim(); if(!text) return [];
+    if(/\n[ \t]*\n/.test(text)) return text.split(/\n[ \t]*\n+/).map(function(b){return b.trim();}).filter(Boolean);
+    var rawLines=text.split('\n');
+    var lines=rawLines.map(function(l){return l.replace(/^\s*\d+[.)]\s*/,'').replace(/^[\-*•]\s*/,'').trim();}).filter(Boolean);
+    if(lines.length<=1) return lines;
+    var numbered=rawLines.filter(function(l){return /^\s*\d+[.)]\s/.test(l);}).length;
+    if(numbered>=2) return lines;
+    var leadish=lines.filter(function(l){ return RE_CP.test(l)||RE_EMAIL.test(l)||RE_PHONE.test(l); }).length;
+    if(leadish>=Math.max(2,Math.ceil(lines.length*0.6))) return lines;
+    return [lines.join('\n')];
+  }
+  function parseLeads(text){ return splitLeadBlocks(text).map(parseLeadBlock).filter(function(s){ return !!(s.addr||s.phone||s.email); }); }
+
+  function tourResetRoute(){ state.tour.order=[]; state.tour.legs=[]; }
+  function analyseLeads(text){
+    var parsed=parseLeads(text);
+    if(!parsed.length){ alert('Aucun client détecté. Vérifie le format ou ajoute les arrêts à la main.'); return; }
+    state.tour.stops=state.tour.stops.concat(parsed); tourResetRoute(); save(); render();
+  }
+  function tourText(label,val,type,on){ var i=el('input',{type:type}); i.value=val||''; i.addEventListener('input',function(){ on(i.value); save(); }); return el('label',{class:'field'},[el('span',null,[label]),i]); }
+  function stopRow(s,i){
+    var tr=el('tr');
+    tr.appendChild(el('td',null,[String(i+1)]));
+    tr.appendChild(td(cellInput(s,'name','text','Nom')));
+    tr.appendChild(td(cellInput(s,'addr','text','Rue, CP commune')));
+    tr.appendChild(td(cellInput(s,'phone','text','+32…')));
+    tr.appendChild(td(cellInput(s,'email','text','email')));
+    tr.appendChild(td(cellInput(s,'note','text','note')));
+    tr.appendChild(delCell(function(){ state.tour.stops=state.tour.stops.filter(function(x){return x.id!==s.id;}); tourResetRoute(); save(); render(); }));
+    return tr;
+  }
+  function buildStopsTable(){
+    var wrap=el('div',{class:'tbl-wrap',style:'margin-top:12px'});
+    var tbl=el('table',{class:'tbl',style:'min-width:760px'});
+    tbl.innerHTML='<thead><tr><th>#</th><th>Nom</th><th>Adresse</th><th>Téléphone</th><th>Email</th><th>Note</th><th></th></tr></thead>';
+    var tb=el('tbody'); state.tour.stops.forEach(function(s,i){ tb.appendChild(stopRow(s,i)); });
+    tbl.appendChild(tb); wrap.appendChild(tbl); return wrap;
+  }
   function renderTournee(){
+    ensureTour(); var T=state.tour;
+    if(!T.baseAddr && state.company.addr) T.baseAddr=state.company.addr;
     var box=el('div');
     box.appendChild(el('div',{class:'eyebrow'},['Tournée']));
-    box.appendChild(el('h2',{class:'section-title',style:'margin-bottom:10px'},['Planifier ma tournée']));
-    box.appendChild(el('p',{class:'section-sub'},['Module en cours de construction.']));
+    box.appendChild(el('h2',{class:'section-title',style:'margin-bottom:6px'},['Planifier ma tournée']));
+    box.appendChild(el('p',{class:'section-sub'},['Colle un email ou une liste de clients, vérifie le tableau, puis géocode et optimise l’itinéraire.']));
+    box.appendChild(el('div',{class:'banner info',style:'margin:12px 0',html:'<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="#0b6e78" stroke-width="1.3"/><path d="M8 7.2v4M8 4.8h.01" stroke="#0b6e78" stroke-width="1.5" stroke-linecap="round"/></svg><div>🔒 Les adresses seront envoyées à <b>OpenStreetMap</b> (géocodage) et à OSRM (itinéraire). Rien d’autre n’est transmis, aucune donnée n’est stockée en ligne.</div>'}));
+
+    // Journée
+    var sc=el('div',{class:'card'}); var sp=el('div',{class:'pad'});
+    sp.appendChild(el('div',{class:'eyebrow'},['Journée']));
+    var sg=el('div',{class:'grid g2',style:'margin-top:8px'});
+    sg.appendChild(tourText('Date', T.date, 'date', function(v){T.date=v;}));
+    sg.appendChild(tourText('Heure de départ', T.startTime, 'time', function(v){T.startTime=v;}));
+    sg.appendChild(numField('Visite par défaut (min)', T.defaultVisitMin, '5', function(v){T.defaultVisitMin=Math.max(0,+v||0); save();}));
+    sg.appendChild(textField('Point de départ (base)', T.baseAddr, 'Adresse société', function(v){T.baseAddr=v; T.baseLatLng=null; save();}));
+    sp.appendChild(sg); sc.appendChild(sp); box.appendChild(sc);
+
+    // Étape 1 — coller
+    var pc=el('div',{class:'card',style:'margin-top:16px'}); var pp=el('div',{class:'pad'});
+    pp.appendChild(el('div',{class:'eyebrow'},['Étape 1']));
+    pp.appendChild(el('h3',{class:'section-title',style:'font-size:15px'},['Coller un email / une liste de clients']));
+    pp.appendChild(el('p',{class:'section-sub'},['Conseil : un client par bloc — Nom / Adresse / Téléphone / Email. Le texte libre est accepté ; tu corriges ensuite dans le tableau.']));
+    var ta=el('textarea',{style:'width:100%;min-height:120px;margin-top:8px',placeholder:'Jean Dupont\nRue de la Station 12, 4000 Liège\n0470 12 34 56\njean@exemple.be\n\nMme Martin\nChaussée de Bruxelles 200, 1300 Wavre\n081 22 33 44'});
+    pp.appendChild(ta);
+    var an=el('button',{class:'btn primary sm',style:'margin-top:10px'},['🔎 Analyser & ajouter au tableau']); an.addEventListener('click',function(){ analyseLeads(ta.value); });
+    pp.appendChild(an);
+    pc.appendChild(pp); box.appendChild(pc);
+
+    // Étape 2 — tableau
+    var tc=el('div',{class:'card',style:'margin-top:16px'}); var tp=el('div',{class:'pad'});
+    tp.appendChild(el('div',{class:'eyebrow'},['Étape 2 — vérifier']));
+    tp.appendChild(el('h3',{class:'section-title',style:'font-size:15px'},['Arrêts de la tournée ('+T.stops.length+')']));
+    tp.appendChild(el('p',{class:'section-sub'},['Corrige les adresses avant de géocoder. Rien n’est envoyé tant que tu n’as pas lancé le géocodage.']));
+    if(T.stops.length) tp.appendChild(buildStopsTable());
+    else tp.appendChild(el('p',{class:'section-sub',style:'margin-top:8px'},['Aucun arrêt. Colle un email ci-dessus ou ajoute un arrêt à la main.']));
+    var addR=el('button',{class:'add-row'},['＋ Ajouter un arrêt']); addR.addEventListener('click',function(){ state.tour.stops.push(newStop()); tourResetRoute(); save(); render(); });
+    tp.appendChild(addR);
+    if(T.stops.length){ var clr=el('button',{class:'btn subtle sm',style:'margin-left:8px'},['Vider la liste']); clr.addEventListener('click',function(){ if(!confirm('Vider la liste des arrêts ?')) return; state.tour.stops=[]; tourResetRoute(); save(); render(); }); tp.appendChild(clr); }
+    tc.appendChild(tp); box.appendChild(tc);
     return box;
   }
 
