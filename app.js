@@ -2662,19 +2662,21 @@
     var box=el('div');
     box.appendChild(el('div',{class:'eyebrow'},['Pilotage']));
     box.appendChild(el('h2',{class:'section-title',style:'margin-bottom:14px'},['Tableau de bord']));
-    var totals={}; DASH_STATUS.forEach(function(s){totals[s[0]]=0;}); var totAll=0;
-    state.savedQuotes.forEach(function(q){ var s=q.status||'brouillon'; if(totals[s]===undefined)totals[s]=0; totals[s]+=(+q.total||0); totAll+=(+q.total||0); });
+    var totals={}, cnt={}; DASH_STATUS.forEach(function(s){totals[s[0]]=0; cnt[s[0]]=0;}); var totAll=0;
+    state.savedQuotes.forEach(function(q){ var s=q.status||'brouillon'; if(totals[s]===undefined){totals[s]=0;cnt[s]=0;} totals[s]+=(+q.total||0); cnt[s]++; totAll+=(+q.total||0); });
+    var sent=cnt.envoye+cnt.accepte+cnt.perdu, taux=sent>0?Math.round(cnt.accepte/sent*100):0;
     var cards=el('div',{class:'grid g3'});
     cards.appendChild(dashCard('Pipeline total', euro.format(totAll), state.savedQuotes.length+' devis', 'var(--ink)'));
-    cards.appendChild(dashCard('Signé (accepté)', euro.format(totals.accepte), 'commandes gagnées', 'var(--good)'));
-    cards.appendChild(dashCard('En cours (envoyé)', euro.format(totals.envoye), 'à relancer', 'var(--cool-deep)'));
+    cards.appendChild(dashCard('Signé (accepté)', euro.format(totals.accepte), cnt.accepte+' commande(s) gagnée(s)', 'var(--good)'));
+    cards.appendChild(dashCard('En cours (envoyé)', euro.format(totals.envoye), cnt.envoye+' à relancer', 'var(--cool-deep)'));
+    cards.appendChild(dashCard('Taux d’acceptation', taux+' %', cnt.accepte+' accepté(s) / '+sent+' envoyé(s)', taux>=50?'var(--good)':'var(--warm)'));
     box.appendChild(cards);
     if(totAll>0){
       var bar=el('div',{style:'display:flex; height:14px; border-radius:8px; overflow:hidden; margin:18px 0 8px; border:1px solid var(--line)'});
       DASH_STATUS.forEach(function(s){ var w=(totals[s[0]]/totAll*100); if(w>0) bar.appendChild(el('div',{style:'width:'+w+'%; background:'+s[2]})); });
       box.appendChild(bar);
       var leg=el('div',{style:'display:flex; gap:16px; flex-wrap:wrap; font-size:11.5px; color:var(--muted)'});
-      DASH_STATUS.forEach(function(s){ leg.appendChild(el('span',null,['■ '+s[1]+' · '+euro.format(totals[s[0]])])); });
+      DASH_STATUS.forEach(function(s){ leg.appendChild(el('span',null,['■ '+s[1]+' · '+euro.format(totals[s[0]])+' ('+cnt[s[0]]+')'])); });
       box.appendChild(leg);
     }
     box.appendChild(buildRelancesCard());
@@ -2697,7 +2699,7 @@
     c.appendChild(p); box.appendChild(c);
     return box;
   }
-  function dashCard(label,val,sub,color){ var c=el('div',{class:'card'}); var p=el('div',{class:'pad'}); p.appendChild(el('div',{class:'total-label'},[label])); p.appendChild(el('div',{class:'num',style:'font-size:26px; font-weight:850; letter-spacing:-.5px; margin-top:4px; color:'+color},[val])); p.appendChild(el('div',{style:'font-size:12px; color:var(--muted); margin-top:2px'},[sub])); return c; }
+  function dashCard(label,val,sub,color){ var c=el('div',{class:'card'}); var p=el('div',{class:'pad'}); p.appendChild(el('div',{class:'total-label'},[label])); p.appendChild(el('div',{class:'num',style:'font-size:26px; font-weight:850; letter-spacing:-.5px; margin-top:4px; color:'+color},[val])); p.appendChild(el('div',{style:'font-size:12px; color:var(--muted); margin-top:2px'},[sub])); c.appendChild(p); return c; }
 
   /* ============================================================
      VUE 3D (maquette extrudée depuis le plan) + PHOTOS
