@@ -107,6 +107,7 @@
   var planCanvasWrap, planSideHost;
   var techDraft=[];      // points de la goulotte en cours de tracé (transient, non persisté)
   var lastTrouDiam=60;   // dernier Ø de trou utilisé (mm)
+  var tourMap=null;      // instance Leaflet de la carte tournée (nettoyée à chaque render)
 
   var TYPES = [['mural','Murale'],['console','Console'],['cassette','Cassette plafond'],['gainable','Gainable']];
   var typeLabel = function(t){ var m={mural:'Murale',console:'Console',cassette:'Cassette',gainable:'Gainable'}; return m[t]||t; };
@@ -246,6 +247,7 @@
   var viewEl=document.getElementById('view');
   function render(){
     if(threeCleanup){ try{threeCleanup();}catch(e){} threeCleanup=null; }
+    if(tourMap){ try{tourMap.remove();}catch(e){} tourMap=null; }
     setTab();
     viewEl.innerHTML='';
     if(state.ui.tab==='home') viewEl.appendChild(renderHome());
@@ -353,21 +355,76 @@
     state.tour.stops=state.tour.stops.concat(parsed); tourResetRoute(); save(); render();
   }
   function tourText(label,val,type,on){ var i=el('input',{type:type}); i.value=val||''; i.addEventListener('input',function(){ on(i.value); save(); }); return el('label',{class:'field'},[el('span',null,[label]),i]); }
+
+  /* ---- Géocodage (Nominatim, throttle ≤ 1/s) + carte (Leaflet/OSM) ---- */
+  function geocodeQuery(q){
+    return fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=be&q='+encodeURIComponent(q),{headers:{'Accept':'application/json'}})
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(function(a){ return (a&&a[0])?{lat:+a[0].lat, lng:+a[0].lon}:null; });
+  }
+  function geocodeAll(statusEl, btn){
+    var T=state.tour, jobs=[];
+    if(T.baseAddr && !T.baseLatLng) jobs.push({type:'base'});
+    T.stops.forEach(function(s){ if(s.addr && !s.latLng){ s.geoFail=false; jobs.push({type:'stop', stop:s}); } });
+    if(!jobs.length){ if(statusEl) statusEl.textContent='Rien à géocoder (tout est déjà localisé ou sans adresse).'; return; }
+    if(btn) btn.disabled=true;
+    var i=0, failed=0;
+    function fin(){ if(btn) btn.disabled=false; save(); render(); if(failed) setTimeout(function(){ alert(failed+' adresse(s) non localisée(s). Corrige l’adresse dans le tableau et relance, ou glisse le pin sur la carte.'); },120); }
+    function next(){
+      if(i>=jobs.length){ if(statusEl) statusEl.textContent='Géocodage terminé.'; fin(); return; }
+      var job=jobs[i], q=job.type==='base'?T.baseAddr:job.stop.addr;
+      if(statusEl) statusEl.textContent='Géocodage '+(i+1)+'/'+jobs.length+'… (≤ 1 requête/seconde)';
+      geocodeQuery(q).then(function(ll){
+        if(ll){ if(job.type==='base') T.baseLatLng=ll; else { job.stop.latLng=ll; job.stop.geoFail=false; } }
+        else { failed++; if(job.type==='stop') job.stop.geoFail=true; }
+      }).catch(function(){
+        failed++; if(job.type==='stop') job.stop.geoFail=true;
+        if(statusEl) statusEl.textContent='Réseau indisponible — réessaie, ou place les pins à la main. ('+(i+1)+'/'+jobs.length+')';
+      }).then(function(){ i++; setTimeout(next, 1100); });
+    }
+    next();
+  }
+  function initTourMap(container){
+    if(typeof L==='undefined'){ container.innerHTML='<div class="banner warn" style="margin:0"><div>Carte indisponible : la librairie Leaflet n’a pas pu être chargée (connexion requise). Le géocodage et le planning restent utilisables hors carte.</div></div>'; return; }
+    var T=state.tour;
+    var map=L.map(container).setView([50.64,4.67], 8); // Belgique
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19, attribution:'© OpenStreetMap'}).addTo(map);
+    tourMap=map;
+    var pts=[];
+    if(T.baseLatLng){
+      var bm=L.marker([T.baseLatLng.lat,T.baseLatLng.lng],{draggable:true,title:'Départ'}).addTo(map).bindPopup('🏠 Départ : '+escapeHtml(T.baseAddr||''));
+      bm.on('dragend',function(){ var ll=bm.getLatLng(); T.baseLatLng={lat:ll.lat,lng:ll.lng}; save(); });
+      pts.push([T.baseLatLng.lat,T.baseLatLng.lng]);
+    }
+    T.stops.forEach(function(s,idx){
+      if(!s.latLng) return;
+      var m=L.marker([s.latLng.lat,s.latLng.lng],{draggable:true,title:s.name||('Arrêt '+(idx+1))}).addTo(map);
+      m.bindPopup('<b>'+escapeHtml(s.name||('Arrêt '+(idx+1)))+'</b><br>'+escapeHtml(s.addr||''));
+      m.on('dragend',function(){ var ll=m.getLatLng(); s.latLng={lat:ll.lat,lng:ll.lng}; s.geoFail=false; save(); });
+      pts.push([s.latLng.lat,s.latLng.lng]);
+    });
+    if(pts.length) map.fitBounds(pts,{padding:[34,34], maxZoom:14});
+    setTimeout(function(){ try{ map.invalidateSize(); }catch(e){} }, 60);
+  }
+  function geoBadge(s){ return s.latLng?'📍':(s.geoFail?'✗':'—'); }
   function stopRow(s,i){
     var tr=el('tr');
     tr.appendChild(el('td',null,[String(i+1)]));
     tr.appendChild(td(cellInput(s,'name','text','Nom')));
-    tr.appendChild(td(cellInput(s,'addr','text','Rue, CP commune')));
+    var addrCell=td(cellInput(s,'addr','text','Rue, CP commune'));
+    var addrInput=addrCell.querySelector('input'); addrInput.addEventListener('input',function(){ s.latLng=null; s.geoFail=false; });
+    tr.appendChild(addrCell);
     tr.appendChild(td(cellInput(s,'phone','text','+32…')));
     tr.appendChild(td(cellInput(s,'email','text','email')));
     tr.appendChild(td(cellInput(s,'note','text','note')));
+    tr.appendChild(el('td',{class:'col-geo',title:s.geoFail?'Adresse non localisée':(s.latLng?'Localisé':'Non géocodé')},[geoBadge(s)]));
     tr.appendChild(delCell(function(){ state.tour.stops=state.tour.stops.filter(function(x){return x.id!==s.id;}); tourResetRoute(); save(); render(); }));
     return tr;
   }
   function buildStopsTable(){
     var wrap=el('div',{class:'tbl-wrap',style:'margin-top:12px'});
-    var tbl=el('table',{class:'tbl',style:'min-width:760px'});
-    tbl.innerHTML='<thead><tr><th>#</th><th>Nom</th><th>Adresse</th><th>Téléphone</th><th>Email</th><th>Note</th><th></th></tr></thead>';
+    var tbl=el('table',{class:'tbl',style:'min-width:800px'});
+    tbl.innerHTML='<thead><tr><th>#</th><th>Nom</th><th>Adresse</th><th>Téléphone</th><th>Email</th><th>Note</th><th>Géo</th><th></th></tr></thead>';
     var tb=el('tbody'); state.tour.stops.forEach(function(s,i){ tb.appendChild(stopRow(s,i)); });
     tbl.appendChild(tb); wrap.appendChild(tbl); return wrap;
   }
@@ -412,6 +469,25 @@
     tp.appendChild(addR);
     if(T.stops.length){ var clr=el('button',{class:'btn subtle sm',style:'margin-left:8px'},['Vider la liste']); clr.addEventListener('click',function(){ if(!confirm('Vider la liste des arrêts ?')) return; state.tour.stops=[]; tourResetRoute(); save(); render(); }); tp.appendChild(clr); }
     tc.appendChild(tp); box.appendChild(tc);
+
+    // Étape 3 — géocoder & carte
+    if(T.stops.length){
+      var gc=el('div',{class:'card',style:'margin-top:16px'}); var gp=el('div',{class:'pad'});
+      gp.appendChild(el('div',{class:'eyebrow'},['Étape 3 — localiser']));
+      gp.appendChild(el('h3',{class:'section-title',style:'font-size:15px'},['Géocodage & carte']));
+      var nGeo=T.stops.filter(function(s){return s.latLng;}).length;
+      gp.appendChild(el('p',{class:'section-sub'},[nGeo+' / '+T.stops.length+' arrêt(s) localisé(s). Corrige une adresse dans le tableau puis relance, ou glisse un pin sur la carte.']));
+      var grow=el('div',{style:'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0'});
+      var gStatus=el('span',{class:'section-sub',style:'font-size:12.5px'},['']);
+      var gBtn=el('button',{class:'btn primary sm'},['🌍 Géocoder les adresses']);
+      gBtn.addEventListener('click',function(){ geocodeAll(gStatus, gBtn); });
+      grow.appendChild(gBtn); grow.appendChild(gStatus); gp.appendChild(grow);
+      var mapWrap=el('div',{id:'tourMap', style:'height:380px;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:#eef2f3'});
+      gp.appendChild(mapWrap);
+      gp.appendChild(el('div',{style:'font-size:11px;color:var(--muted);margin-top:6px'},['Carte © OpenStreetMap. Géocodage Nominatim — usage modéré (1 requête/seconde).']));
+      gc.appendChild(gp); box.appendChild(gc);
+      setTimeout(function(){ try{ initTourMap(mapWrap); }catch(e){ mapWrap.innerHTML='<div class="banner warn" style="margin:0"><div>Carte indisponible : '+escapeHtml(e.message)+'</div></div>'; } },0);
+    }
     return box;
   }
 
