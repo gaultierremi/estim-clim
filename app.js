@@ -40,7 +40,7 @@
         {id:UID(), name:'Support / protection groupe extérieur', price:120}
       ],
       primes:{ base:600, mult:{R1:6,R2:4,R3:2,R4:1.5}, capPct:{R1:70,R2:70,R3:50,R4:50}, minAgeYears:15, requiresAudit:true },
-      finance:{ acomptePct:30, paymentTerms:'Acompte à la commande, solde à la fin des travaux. Devis valable selon la durée indiquée, sous réserve de visite technique.', cgv:'' },
+      finance:{ acomptePct:30, paymentTerms:'Acompte à la commande, solde à la fin des travaux. Devis valable selon la durée indiquée, sous réserve de visite technique.', cgv:'', simRate:0, simMonths:0 },
       savings:{ fossilPrice:0.11, fossilEff:0.9, pacPrice:0.30, scop:3.8 },
       settings:{ vat:6, quoteCounter:1 },
       quote: newQuote(),
@@ -233,11 +233,19 @@
     var amount=Math.max(0, Math.min(base, cap));
     return {eligible:true, amount:amount, base:base, cap:cap, reason:'Prime Habitation estimée (PAC air-eau, cat. '+q.incomeCat+'). Audit logement requis avant travaux, logement de plus de '+P.minAgeYears+' ans. Montant à confirmer sur logement.wallonie.be.'};
   }
+  // Mensualité d'amortissement standard (simulation indicative — pas une offre de crédit)
+  function computePMT(principal, annualPct, months){
+    principal=+principal||0; months=+months||0; if(months<=0) return 0;
+    var r=(+annualPct||0)/100/12; if(r<=0) return principal/months;
+    return principal*r/(1-Math.pow(1+r,-months));
+  }
   function computeFinance(){
     var t=computeTotals(), pr=computePrime();
     var reste=Math.max(0, t.tvac - pr.amount);
     var acompte=t.tvac*((+state.finance.acomptePct||0)/100);
-    return {tvac:t.tvac, htva:t.htva, prime:pr, reste:reste, acompte:acompte, solde:t.tvac-acompte};
+    var months=+state.finance.simMonths||0, rate=+state.finance.simRate||0;
+    var simBase=reste, pmt=months>0?computePMT(simBase, rate, months):0;
+    return {tvac:t.tvac, htva:t.htva, prime:pr, reste:reste, acompte:acompte, solde:t.tvac-acompte, simMonths:months, simRate:rate, simBase:simBase, pmt:pmt};
   }
   function computeROI(){
     var q=state.quote, S=state.savings; var kwh=+q.annualKwh||0;
@@ -1351,6 +1359,12 @@
     var gf=el('div',{class:'grid g2',style:'margin-top:14px'});
     gf.appendChild(numField('Acompte (%)', state.finance.acomptePct,'1', function(v){state.finance.acomptePct=v; save();}));
     p2.appendChild(gf);
+    p2.appendChild(el('div',{class:'total-label',style:'margin-top:16px'},['Simulation de mensualités']));
+    p2.appendChild(el('div',{class:'banner warn',style:'margin:8px 0',html:'<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1l7 13H1L8 1z" stroke="#b6810f" stroke-width="1.4" stroke-linejoin="round"/></svg><div><b>Simulation indicative</b> — pas une offre de crédit. Le financement réel passe par un partenaire agréé. Mensualité calculée sur le reste à charge estimé.</div>'}));
+    var gs=el('div',{class:'grid g2'});
+    gs.appendChild(numField('Taux annuel (%)', state.finance.simRate,'0.1', function(v){state.finance.simRate=Math.max(0,+v||0); save();}));
+    gs.appendChild(numField('Durée (mois, 0 = off)', state.finance.simMonths,'1', function(v){state.finance.simMonths=Math.max(0,Math.round(+v||0)); save();}));
+    p2.appendChild(gs);
     var pt=el('textarea'); pt.value=state.finance.paymentTerms; pt.addEventListener('input',function(){state.finance.paymentTerms=pt.value; save();});
     p2.appendChild(el('label',{class:'field',style:'margin-top:12px'},[el('span',null,['Conditions de paiement (PDF)']), pt]));
     var cgv=el('textarea',{style:'min-height:90px'}); cgv.value=state.finance.cgv; cgv.addEventListener('input',function(){state.finance.cgv=cgv.value; save();});
@@ -1483,7 +1497,9 @@
         (fin.prime.eligible&&fin.prime.amount>0? '<div style="color:#2f8f5b"><span>Prime Habitation estimée</span><span>− '+euro2.format(fin.prime.amount)+'</span></div><div style="font-weight:800"><span>Reste à charge estimé</span><span>'+euro2.format(fin.reste)+'</span></div>':'')+
         '<div style="margin-top:6px"><span>Acompte ('+(state.finance.acomptePct||0)+' %)</span><span>'+euro2.format(fin.acompte)+'</span></div>'+
         '<div><span>Solde à la fin des travaux</span><span>'+euro2.format(fin.solde)+'</span></div>'+
+        (fin.pmt>0? '<div style="margin-top:6px"><span>Mensualité (simulation)</span><span>'+euro2.format(fin.pmt)+' × '+fin.simMonths+' mois</span></div>':'')+
       '</div>'+
+      (fin.pmt>0? '<div class="pd-legal" style="border-top:none;padding-top:2px">Mensualité : simulation indicative (taux '+techRound1(fin.simRate)+' %), ce n’est pas une offre de crédit ; le financement réel passe par un partenaire agréé.</div>':'')+
       '<div class="pd-legal">'+escapeHtml(state.finance.paymentTerms||'')+(fin.prime.eligible&&fin.prime.amount>0?' '+escapeHtml(fin.prime.reason):'')+'<br>'+escapeHtml(co.footer||'')+'</div>'+
       (state.finance.cgv? '<div style="page-break-before:always"></div><div class="pd-section-label">Conditions générales</div><div class="pd-legal" style="border-top:none">'+escapeHtml(state.finance.cgv)+'</div>':'')+
       (planHasContent()? '<div style="page-break-before:always"></div><div class="pd-section-label">Plan d\'implantation</div><div style="border:1px solid #dce5e8;border-radius:8px;overflow:hidden;margin-top:4px">'+planSVGString({readonly:true})+'</div>' : '');
@@ -1855,6 +1871,11 @@
       if(fin.prime.eligible&&fin.prime.amount>0) rhHtml += '<br>Prime Région estimée : −'+euro.format(fin.prime.amount);
       rhHtml += '<br>Acompte à la commande : '+euro.format(fin.acompte);
       rh.innerHTML=rhHtml; offer.appendChild(rh); body.appendChild(offer);
+      if(fin.pmt>0){
+        var simBox=el('div',{style:'margin-top:14px; background:var(--cool-wash); border:1px solid #bfe5e9; border-radius:12px; padding:14px 16px; font-size:13px; color:var(--cool-deep)'});
+        simBox.innerHTML='💳 <b>À partir de '+euro2.format(fin.pmt)+' / mois</b> sur '+fin.simMonths+' mois'+(fin.simRate>0?(' (taux indicatif '+techRound1(fin.simRate)+' %)'):' (sans intérêts)')+'. <span style="color:var(--muted)">Simulation indicative — pas une offre de crédit ; financement via un partenaire agréé.</span>';
+        body.appendChild(simBox);
+      }
       if(roi && roi.annual>0){
         var roiBox=el('div',{style:'margin-top:14px; background:var(--good-wash); border:1px solid #c7e6d3; border-radius:12px; padding:14px 16px; font-size:13px; color:#23603f'});
         roiBox.innerHTML='💡 <b>Économies estimées</b> : environ '+euro.format(roi.annual)+' / an vs votre énergie actuelle'+(roi.payback?', soit un retour sur le reste à charge en ~'+roi.payback.toFixed(1).replace('.',',')+' ans.':'.')+' <span style="color:var(--muted)">Estimation indicative selon les hypothèses de prix et de SCOP.</span>';
