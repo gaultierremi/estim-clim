@@ -242,7 +242,19 @@
     ];
     return d;
   }
-  function refreshDemoUI(){ try{ document.body.classList.toggle('demo-mode', isDemo()); }catch(e){} }
+  function refreshDemoUI(){
+    try{
+      document.body.classList.toggle('demo-mode', isDemo());
+      var bar=document.getElementById('demoBar');
+      if(isDemo()){
+        if(!bar){ bar=el('div',{id:'demoBar',class:'demo-bar'}); document.body.insertBefore(bar, document.body.firstChild); }
+        bar.innerHTML='';
+        bar.appendChild(el('span',null,['🎬 MODE DÉMO — données fictives, sans valeur commerciale']));
+        var q=el('button',{class:'btn sm'},['Quitter']); q.addEventListener('click', exitDemo); bar.appendChild(q);
+      } else if(bar && bar.parentNode){ bar.parentNode.removeChild(bar); }
+    }catch(e){}
+  }
+  function demoPdfBanner(){ return isDemo()? '<div class="pd-demo">⚠ DÉMO — sans valeur commerciale · document de démonstration, données fictives</div>' : ''; }
   function reloadActive(){
     load();
     state.ui = Object.assign({tab:'home',adminSection:'societe',clientPrices:true,clientView:false,planSel:null,shared:false}, {});
@@ -732,7 +744,7 @@
         '<div class="grand"><span>Fin de journée estimée</span><span>'+fmtHM(sch.end)+'</span></div></div>';
     }
     html+='<div class="pd-legal">Itinéraire et durées estimés (OSRM ou distance à vol d’oiseau). Horaires indicatifs, susceptibles de varier selon le trafic et la durée réelle des visites.</div>';
-    document.getElementById('printDoc').innerHTML=html;
+    document.getElementById('printDoc').innerHTML=demoPdfBanner()+html;
   }
   function stopRow(s,i){
     var tr=el('tr');
@@ -1700,8 +1712,9 @@
   /* ---------- export / import ---------- */
   function doExport(){
     var copy=Object.assign({},state); delete copy.ui;
+    if(isDemo()){ copy._demo=true; copy._demoNote='Export de DÉMONSTRATION — données fictives, sans valeur commerciale.'; }
     var blob=new Blob([JSON.stringify(copy,null,2)],{type:'application/json'});
-    var a=el('a'); a.href=URL.createObjectURL(blob); a.download='estimclim-config-'+new Date().toISOString().slice(0,10)+'.json';
+    var a=el('a'); a.href=URL.createObjectURL(blob); a.download=(isDemo()?'estimclim-DEMO-':'estimclim-config-')+new Date().toISOString().slice(0,10)+'.json';
     document.body.appendChild(a); a.click(); setTimeout(function(){ try{ if(URL.revokeObjectURL) URL.revokeObjectURL(a.href); }catch(e){} a.remove(); },100);
   }
   document.getElementById('exportBtn').addEventListener('click', doExport);
@@ -1773,7 +1786,7 @@
       '<div class="pd-legal">'+(isBC?'<b>Bon de commande</b> faisant suite au devis accepté — vaut accord de réalisation. ':'')+escapeHtml(state.finance.paymentTerms||'')+(fin.prime.eligible&&fin.prime.amount>0?' '+escapeHtml(fin.prime.reason):'')+'<br>'+escapeHtml(co.footer||'')+'</div>'+
       (state.finance.cgv? '<div style="page-break-before:always"></div><div class="pd-section-label">Conditions générales</div><div class="pd-legal" style="border-top:none">'+escapeHtml(state.finance.cgv)+'</div>':'')+
       (planHasContent()? '<div style="page-break-before:always"></div><div class="pd-section-label">Plan d\'implantation</div><div style="border:1px solid #dce5e8;border-radius:8px;overflow:hidden;margin-top:4px">'+planSVGString({readonly:true})+'</div>' : '');
-    document.getElementById('printDoc').innerHTML=html;
+    document.getElementById('printDoc').innerHTML=demoPdfBanner()+html;
   }
 
   /* ============================================================
@@ -2217,7 +2230,7 @@
   function buildShareSnapshot(){
     var co=state.company, q=state.quote, t=computeTotals(), fin=computeFinance(), roi=computeROI(), P=state.plan;
     return {
-      v:1,
+      v:1, demo:isDemo(),
       co:{ n:co.name||'', p:co.phone||'', e:co.email||'', f:co.footer||'' },
       cl:{ n:q.client.name||'', a:q.client.addr||'' },
       d: q.date || new Date().toISOString().slice(0,10),
@@ -2315,6 +2328,7 @@
 
   function renderSharedProposal(snap){
     var box=el('div');
+    if(snap.demo) box.appendChild(el('div',{class:'banner warn',style:'margin-bottom:10px'},['🎬 DÉMO — proposition de démonstration, données fictives, sans valeur commerciale.']));
     box.appendChild(el('div',{class:'banner info',style:'margin-bottom:14px'},['Proposition établie par '+(snap.co.n||'votre installateur')+' — document en lecture seule.']));
     var cv=el('div',{class:'cv'});
     var head=el('div',{class:'cv-head'});
@@ -2600,7 +2614,7 @@
     html+='</tbody></table>';
     if(s.alerts.length) html+='<div class="fp-banner">⚠ '+s.alerts.map(function(a){return escapeHtml(a.room+' : '+a.msg);}).join(' ; ')+'</div>';
     if(planHasContent()) html+='<div style="page-break-before:always"></div><div class="pd-section-label">Plan d’implantation annoté</div><div style="border:1px solid #dce5e8;border-radius:8px;overflow:hidden;margin-top:4px">'+planSVGString({technical:true})+'</div>';
-    document.getElementById('printDoc').innerHTML=html;
+    document.getElementById('printDoc').innerHTML=demoPdfBanner()+html;
   }
 
   /* ---- Éditeur d'élévation de mur (par unité) ---- */

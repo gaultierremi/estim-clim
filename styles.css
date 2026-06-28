@@ -229,6 +229,13 @@
   .cv-offer .big{font-size:30px; font-weight:850; letter-spacing:-1px}
   .cv-note{font-size:11.5px; color:var(--muted); margin-top:14px; line-height:1.6}
 
+  /* Mode démo */
+  .demo-bar{ position:sticky; top:0; z-index:60; background:var(--warm); color:#3a2400; font-weight:800; font-size:12.5px; display:flex; align-items:center; justify-content:center; gap:14px; padding:7px 12px; box-shadow:0 2px 8px rgba(0,0,0,.18) }
+  .demo-bar .btn{ padding:3px 11px; background:#3a2400; color:#fff; border:none; font-size:12px }
+  body.demo-mode header.app{ top:34px }
+  .pd-demo{ background:#fbf0e0; border:1.5px solid #c9760f; color:#6b4408; font-weight:800; text-align:center; padding:8px 12px; border-radius:8px; margin-bottom:12px; letter-spacing:.02em }
+  @media print{ .pd-demo{ -webkit-print-color-adjust:exact; print-color-adjust:exact } }
+
   /* Portail d'accueil */
   .home{max-width:880px; margin:0 auto}
   .home-hero{text-align:center; padding:24px 10px 8px}
