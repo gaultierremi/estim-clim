@@ -1025,7 +1025,7 @@
   /* ============================================================
      ADMIN VIEW
      ============================================================ */
-  var ADMIN_SECTIONS=[['societe','Société'],['interieures','Unités intérieures'],['exterieurs','Groupes extérieurs'],['mainoeuvre','Main-d\u2019œuvre'],['prestations','Prestations'],['primes','Primes & finances'],['messages','Messages tournée'],['sauvegardes','Sauvegardes & devis']];
+  var ADMIN_SECTIONS=[['societe','Société'],['interieures','Unités intérieures'],['exterieurs','Groupes extérieurs'],['mainoeuvre','Main-d\u2019œuvre'],['prestations','Prestations'],['primes','Primes & finances'],['messages','Messages tournée'],['outils','Outils & aide'],['sauvegardes','Sauvegardes & devis']];
   function renderAdmin(){
     var wrap=el('div');
     var nav=el('div',{class:'subnav'});
@@ -1043,8 +1043,39 @@
     else if(sec==='prestations') wrap.appendChild(adminPrestations());
     else if(sec==='primes') wrap.appendChild(adminPrimesFinances());
     else if(sec==='messages') wrap.appendChild(adminMessages());
+    else if(sec==='outils') wrap.appendChild(adminOutils());
     else wrap.appendChild(adminSauvegardes());
     return wrap;
+  }
+  function adminOutils(){
+    var box=el('div');
+    var c=el('div',{class:'card'}); var p=el('div',{class:'pad'});
+    p.appendChild(el('div',{class:'eyebrow'},['Outils']));
+    p.appendChild(el('h2',{class:'section-title'},['Convertisseurs rapides']));
+    p.appendChild(el('h3',{class:'section-title',style:'font-size:14px;margin-top:14px'},['Puissance : BTU/h ↔ kW']));
+    var g=el('div',{class:'grid g2',style:'margin-top:8px'});
+    var kwIn=el('input',{type:'number',step:'0.1',min:'0',id:'cvKw'});
+    var btuIn=el('input',{type:'number',step:'100',min:'0',id:'cvBtu'});
+    kwIn.addEventListener('input',function(){ var v=parseFloat(kwIn.value); btuIn.value=isFinite(v)?Math.round(v*3412.142):''; });
+    btuIn.addEventListener('input',function(){ var v=parseFloat(btuIn.value); kwIn.value=isFinite(v)?Math.round(v/3412.142*100)/100:''; });
+    g.appendChild(el('label',{class:'field'},[el('span',null,['kW']),kwIn]));
+    g.appendChild(el('label',{class:'field'},[el('span',null,['BTU/h']),btuIn]));
+    p.appendChild(g);
+    p.appendChild(el('h3',{class:'section-title',style:'font-size:14px;margin-top:16px'},['Surface → puissance estimée']));
+    p.appendChild(el('p',{class:'section-sub'},['Estimation avec les hypothèses par défaut du devis (isolation moyenne, exposition sud). Pour un dimensionnement réel, utilise l’onglet Devis.']));
+    var g2=el('div',{class:'grid g2',style:'margin-top:8px'});
+    var surfIn=el('input',{type:'number',step:'1',min:'0',id:'cvSurf'}); surfIn.value='20';
+    var out=el('div',{class:'room-result',style:'margin:0'});
+    var outKw=el('div',{class:'kw num',id:'cvOutKw'});
+    out.appendChild(el('div',null,[el('div',{class:'total-label'},['Besoin estimé']), outKw]));
+    var outReco=el('div',{class:'reco',id:'cvOutReco'}); out.appendChild(outReco);
+    function calc(){ var s=Math.max(0,parseFloat(surfIn.value)||0); var r=newRoom(); r.surface=s; var cc=computeRoom(r); outKw.innerHTML=cc.kW.toFixed(1).replace('.',',')+' <small>kW</small>'; outReco.innerHTML='Unité conseillée : <b>'+fmtKw(cc.reco)+'</b>'; }
+    surfIn.addEventListener('input',calc);
+    g2.appendChild(el('label',{class:'field'},[el('span',null,['Surface (m²)']),surfIn]));
+    g2.appendChild(out);
+    p.appendChild(g2); calc();
+    c.appendChild(p); box.appendChild(c);
+    return box;
   }
   function adminMessages(){
     ensureTourMsg(); var m=state.tourMsg;
