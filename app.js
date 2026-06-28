@@ -3151,7 +3151,7 @@
       renderer.domElement.style.display='none'; document.body.appendChild(renderer.domElement);
       scene=new THREE.Scene();
       camera=new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 50);
-      scene.add(new THREE.HemisphereLight(0xffffff,0x8a9099,1.0));
+      var hemi=new THREE.HemisphereLight(0xffffff,0x8a9099,1.0); scene.add(hemi);
       var dl=new THREE.DirectionalLight(0xffffff,0.55); dl.position.set(1,3,2); scene.add(dl);
       reticle=new THREE.Mesh(new THREE.RingGeometry(0.06,0.085,32).rotateX(-Math.PI/2), new THREE.MeshBasicMaterial({color:0x0e9aa8}));
       reticle.matrixAutoUpdate=false; reticle.visible=false; scene.add(reticle);
@@ -3189,7 +3189,7 @@
     function clearAll(){ placed.forEach(function(u){ scene.remove(u); }); placed=[]; updateStats(); }
 
     // Features optionnelles : la session démarre même si le casque/téléphone ne les supporte pas (repli propre).
-    var sessReq={ requiredFeatures:['hit-test'], optionalFeatures:['dom-overlay','depth-sensing'], domOverlay:{ root: overlay },
+    var sessReq={ requiredFeatures:['hit-test'], optionalFeatures:['dom-overlay','depth-sensing','light-estimation'], domOverlay:{ root: overlay },
       depthSensing:{ usagePreference:['cpu-optimized'], dataFormatPreference:['luminance-alpha','float32'] } };
     navigator.xr.requestSession('immersive-ar', sessReq)
       .catch(function(){ return navigator.xr.requestSession('immersive-ar', { requiredFeatures:['hit-test'], optionalFeatures:['dom-overlay'], domOverlay:{ root: overlay } }); })
@@ -3202,6 +3202,7 @@
         });
         refSpace=renderer.xr.getReferenceSpace();
         depthActive = !!(session.depthUsage || session.depthDataFormat); // AR1 : depth-sensing accordé ?
+        setupLightProbe(); // AR2 : éclairage réel estimé
         var ub=overlay.querySelector('#arpUndo'), cb=overlay.querySelector('#arpClear'), qb=overlay.querySelector('#arpQuit');
         if(ub) ub.onclick=undo;
         if(cb) cb.onclick=clearAll;
@@ -3215,6 +3216,20 @@
         alert('Impossible de démarrer l\u2019AR : '+(err&&err.message||err)+'\n\nVérifie : Chrome à jour, « Google Play Services for AR » installé, et accès via une adresse https.');
       });
 
+    // AR2 — light estimation : éclaire l'unité selon la lumière réelle (intensité/direction/teinte).
+    var lightProbe=null;
+    function setupLightProbe(){ try{ if(session.requestLightProbe) session.requestLightProbe().then(function(p){ lightProbe=p; }).catch(function(){}); }catch(e){} }
+    function applyLightEstimate(frame){
+      if(!lightProbe || !frame.getLightEstimate) return;
+      try{
+        var est=frame.getLightEstimate(lightProbe); if(!est) return;
+        var pi=est.primaryLightIntensity, pd=est.primaryLightDirection;
+        if(pi){ var inten=Math.max(pi.x,pi.y,pi.z)||0; if(inten>0){ dl.intensity=Math.min(2.5,inten); dl.color.setRGB(Math.min(1,pi.x/inten),Math.min(1,pi.y/inten),Math.min(1,pi.z/inten)); } }
+        if(pd){ dl.position.set(-pd.x,-pd.y,-pd.z); }
+        var sh=est.sphericalHarmonicsCoefficients;
+        if(sh && sh.length>=3){ hemi.intensity=Math.min(2.0, Math.max(0.2, (sh[0]+sh[1]+sh[2])/3 + 0.3)); }
+      }catch(e){}
+    }
     // AR1 — occlusion par profondeur (par objet, robuste et garde-fou) : on masque une unité
     // si la surface réelle devant elle (depth ARCore) est plus proche que l'unité. Approximation
     // par objet (pas par pixel) ; désactivable. Profondeur = estimée, pas une mesure certifiée.
@@ -3250,7 +3265,7 @@
         else reticle.visible=false;
         updateStats();
       }
-      if(frame) applyOcclusion(frame);
+      if(frame){ applyLightEstimate(frame); applyOcclusion(frame); }
       try{ renderer.render(scene,camera); }catch(e){}
     }
     function cleanup(){
