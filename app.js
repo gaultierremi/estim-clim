@@ -530,12 +530,39 @@
   function stopSlotText(row){ var T=state.tour, d=T.date?frDate(T.date):''; return (d?('le '+d+' '):'')+'entre '+fmtHM(row.arrive)+' et '+fmtHM(row.depart); }
   function tourMsgFill(tpl, stop, slot){ var co=state.company.name||'votre installateur'; return String(tpl||'').replace(/\{nom\}/g, stop.name||'').replace(/\{creneau\}/g, slot||'').replace(/\{societe\}/g, co); }
   function telHref(phone){ return 'tel:'+String(phone||'').replace(/[^+\d]/g,''); }
+  // MAP1 — vraie optimisation TSP via OSRM /trip (sans clé). Repli : heuristique NN+2-opt.
+  function tripOSRM(){
+    var T=state.tour, stops=T.stops.filter(function(s){return s.latLng;});
+    if(stops.length<2) return Promise.resolve(false);
+    var hasBase=!!T.baseLatLng;
+    var coords=[]; if(hasBase) coords.push(T.baseLatLng); coords=coords.concat(stops.map(function(s){return s.latLng;}));
+    var path=coords.map(function(c){return c.lng+','+c.lat;}).join(';');
+    var url='https://router.project-osrm.org/trip/v1/driving/'+path+'?source=first&roundtrip=false&overview=full&geometries=geojson';
+    return fetch(url).then(function(r){ if(!r.ok) throw new Error('http'); return r.json(); }).then(function(j){
+      if(j.code!=='Ok' || !j.trips || !j.trips[0] || !j.waypoints) throw new Error('no trip');
+      var wps=j.waypoints, seq=[];
+      stops.forEach(function(s,i){ var wp=wps[hasBase?i+1:i]; if(wp && wp.waypoint_index!=null) seq.push({s:s, pos:wp.waypoint_index}); });
+      seq.sort(function(a,b){ return a.pos-b.pos; });
+      T.order=seq.map(function(x){return x.s.id;});
+      T.routeGeo=j.trips[0].geometry||null;
+      var legs=j.trips[0].legs||[], seqStops=orderedStops();
+      T.legs=seqStops.map(function(s,i){ var idx=hasBase?i:i-1; var L=idx>=0?legs[idx]:null; return {fromId:i===0?(hasBase?'base':null):seqStops[i-1].id, toId:s.id, km:L?L.distance/1000:0, min:L?Math.round(L.duration/60):0}; });
+      return true;
+    });
+  }
   function optimizeAndRoute(statusEl){
     if(state.tour.stops.filter(function(s){return s.latLng;}).length<1){ alert('Géocode au moins un arrêt avant d’optimiser.'); return; }
-    optimizeOrder(); computeLegsHaversine(); save(); refreshItin();
-    if(statusEl) statusEl.textContent='Itinéraire optimisé (durées à vol d’oiseau). Calcul routier…';
-    fetchOSRM().then(function(okk){ if(statusEl) statusEl.textContent=okk?'Durées routières (OSRM) appliquées.':'OSRM indisponible — durées estimées à vol d’oiseau.'; save(); refreshItin(); })
-      .catch(function(){ if(statusEl) statusEl.textContent='OSRM indisponible — durées estimées à vol d’oiseau.'; });
+    if(statusEl) statusEl.textContent='Optimisation de l’itinéraire (OSRM Trip)…';
+    tripOSRM().then(function(okk){
+      if(!okk) throw new Error('fallback');
+      if(statusEl) statusEl.textContent='Itinéraire optimisé (OSRM Trip).'; save(); refreshItin();
+    }).catch(function(){
+      // repli : heuristique maison + durées (OSRM route puis haversine)
+      optimizeOrder(); computeLegsHaversine(); save(); refreshItin();
+      if(statusEl) statusEl.textContent='OSRM Trip indisponible — ordre heuristique. Calcul des durées…';
+      fetchOSRM().then(function(okk){ if(statusEl) statusEl.textContent=okk?'Durées routières appliquées (ordre heuristique).':'Hors-ligne — ordre et durées estimés.'; save(); refreshItin(); })
+        .catch(function(){ if(statusEl) statusEl.textContent='Hors-ligne — ordre et durées estimés (à vol d’oiseau).'; });
+    });
   }
   function startDevisForStop(s){
     var q=state.quote, hasWork = q.client.name || q.rooms.length>1 || (q.rooms[0]&&q.rooms[0].productId) || q.extraLines.length;
