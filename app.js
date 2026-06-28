@@ -2415,6 +2415,8 @@
       var val = (k==='emplacementGroupe'||k==='obstacles') ? v[k] : visitValLabel(k, v[k]);
       if(val) rows.push('<tr><td class="fp-k">'+VISIT_LABELS[k]+'</td><td>'+escapeHtml(val)+'</td></tr>');
     });
+    var ex=v.existing||{}; var exParts=[ex.marque,ex.modele,ex.type,ex.annee].filter(Boolean);
+    if(exParts.length) rows.push('<tr><td class="fp-k">Unité remplacée</td><td>'+escapeHtml(exParts.join(' · '))+'</td></tr>');
     if(!rows.length) return '';
     return '<div class="pd-section-label">Relevé de visite</div><table class="pd-table fp-table"><tbody>'+rows.join('')+'</tbody></table>';
   }
@@ -2576,6 +2578,15 @@
     g.appendChild(vtxt('Emplacement groupe ext.','emplacementGroupe','ex. façade arrière, sol'));
     p.appendChild(g);
     p.appendChild(vtxt('Obstacles / contraintes','obstacles','ex. accès échelle, copropriété, mitoyenneté'));
+    // Capture de l'existant (remplacement)
+    p.appendChild(el('div',{class:'total-label',style:'margin-top:16px'},['Unité remplacée (si remplacement)']));
+    var ex=v.existing; var ge=el('div',{class:'grid g2',style:'margin-top:8px'});
+    function extxt(label,key,ph){ var i=el('input',{type:'text'}); i.value=ex[key]||''; if(ph)i.placeholder=ph; i.addEventListener('input',function(){ ex[key]=i.value; save(); }); return el('label',{class:'field'},[el('span',null,[label]),i]); }
+    ge.appendChild(extxt('Marque','marque',''));
+    ge.appendChild(extxt('Modèle','modele',''));
+    ge.appendChild(extxt('Type','type','ex. mural, console'));
+    ge.appendChild(extxt('Année','annee','ex. 2009'));
+    p.appendChild(ge);
     c.appendChild(p); return c;
   }
   function selFieldV(label,val,options,on){ var s=el('select'); options.forEach(function(o){ s.appendChild(opt(o[0],o[1],o[0]===val)); }); s.addEventListener('change',function(){on(s.value);}); return el('label',{class:'field'},[el('span',null,[label]),s]); }
