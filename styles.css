@@ -181,6 +181,11 @@
   .pd-tot div{display:flex; justify-content:space-between; padding:4px 8px}
   .pd-tot .grand{font-size:17px; font-weight:850; border-top:2px solid var(--ink); margin-top:4px; padding-top:8px}
   .pd-legal{margin-top:16px; font-size:10px; color:var(--muted); border-top:1px solid var(--line); padding-top:10px; line-height:1.55}
+  .pd-sign{margin-top:16px; border:1px solid var(--line); border-radius:8px; padding:10px 12px; max-width:340px}
+  .pd-sign-lbl{font-size:11px; font-weight:800; color:var(--ink); text-transform:uppercase; letter-spacing:.05em}
+  .pd-sign img{display:block; max-width:300px; max-height:120px; margin:6px 0}
+  .pd-sign-note{font-size:9px; color:var(--muted)}
+  .sig-canvas{display:block; width:100%; height:auto; aspect-ratio:3/1; background:#fff; border:1px dashed var(--cool); border-radius:10px; touch-action:none; margin:6px 0 4px}
   /* fiche de pose */
   .fp-banner{background:var(--warm-wash); border:1px solid #f0d8ad; color:#6b4408; border-radius:8px; padding:8px 12px; font-size:11px; margin:6px 0 14px; line-height:1.5}
   .fp-unit{border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin-bottom:12px; page-break-inside:avoid}

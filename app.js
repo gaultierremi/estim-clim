@@ -74,7 +74,7 @@
       date:new Date().toISOString().slice(0,10),
       projectType:'clim', incomeCat:'none', annualKwh:0,
       rooms:[ newRoom('Séjour') ],
-      outdoorId:null, extraLines:[], remise:0
+      outdoorId:null, extraLines:[], remise:0, signature:null
     };
   }
   function newRoom(name){
@@ -1521,6 +1521,7 @@
         (fin.pmt>0? '<div style="margin-top:6px"><span>Mensualité (simulation)</span><span>'+euro2.format(fin.pmt)+' × '+fin.simMonths+' mois</span></div>':'')+
       '</div>'+
       (fin.pmt>0? '<div class="pd-legal" style="border-top:none;padding-top:2px">Mensualité : simulation indicative (taux '+techRound1(fin.simRate)+' %), ce n’est pas une offre de crédit ; le financement réel passe par un partenaire agréé.</div>':'')+
+      (q.signature&&q.signature.data? '<div class="pd-sign"><div class="pd-sign-lbl">Bon pour accord — '+escapeHtml(q.signature.date||'')+'</div><img src="'+q.signature.data+'" alt="signature"><div class="pd-sign-note">Signature manuscrite valant accord visuel sur le présent devis — pas une signature électronique à valeur légale.</div></div>':'')+
       '<div class="pd-legal">'+escapeHtml(state.finance.paymentTerms||'')+(fin.prime.eligible&&fin.prime.amount>0?' '+escapeHtml(fin.prime.reason):'')+'<br>'+escapeHtml(co.footer||'')+'</div>'+
       (state.finance.cgv? '<div style="page-break-before:always"></div><div class="pd-section-label">Conditions générales</div><div class="pd-legal" style="border-top:none">'+escapeHtml(state.finance.cgv)+'</div>':'')+
       (planHasContent()? '<div style="page-break-before:always"></div><div class="pd-section-label">Plan d\'implantation</div><div style="border:1px solid #dce5e8;border-radius:8px;overflow:hidden;margin-top:4px">'+planSVGString({readonly:true})+'</div>' : '');
@@ -1858,6 +1859,32 @@
     return Object.keys(map).map(function(k){ var m=map[k]; return {text:m.n+'× '+m.label, stroke:m.stroke}; });
   }
 
+  function closeSig(){ var m=document.getElementById('sigModal'); if(m&&m.parentNode) m.parentNode.removeChild(m); }
+  function openSignatureModal(){
+    var back=el('div',{class:'share-modal',id:'sigModal'});
+    var panel=el('div',{class:'share-panel'});
+    panel.appendChild(el('div',{class:'eyebrow'},['Accord']));
+    panel.appendChild(el('h2',{class:'section-title',style:'margin:2px 0 6px'},['Bon pour accord']));
+    panel.appendChild(el('p',{class:'section-sub'},['Signez dans le cadre. Cette signature manuscrite vaut accord visuel sur le devis et est intégrée au PDF ; ce n’est <b>pas une signature électronique à valeur légale</b> (laquelle requiert un service qualifié avec piste d’audit).']));
+    var cv=el('canvas',{class:'sig-canvas',width:'600',height:'200'});
+    panel.appendChild(cv);
+    var ctx=cv.getContext('2d'); ctx.lineWidth=2.5; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#0f1b24';
+    var drawing=false,last=null,dirty=false;
+    function pos(e){ var r=cv.getBoundingClientRect(); var src=(e.touches&&e.touches[0])?e.touches[0]:e; return {x:(src.clientX-r.left)*(cv.width/r.width), y:(src.clientY-r.top)*(cv.height/r.height)}; }
+    function down(e){ e.preventDefault(); drawing=true; last=pos(e); try{cv.setPointerCapture(e.pointerId);}catch(_){} }
+    function move(e){ if(!drawing) return; e.preventDefault(); var p=pos(e); ctx.beginPath(); ctx.moveTo(last.x,last.y); ctx.lineTo(p.x,p.y); ctx.stroke(); last=p; dirty=true; }
+    function up(){ drawing=false; }
+    cv.addEventListener('pointerdown',down); cv.addEventListener('pointermove',move); cv.addEventListener('pointerup',up); cv.addEventListener('pointercancel',up);
+    var row=el('div',{class:'share-actions'});
+    var ok=el('button',{class:'btn primary'},['✓ Valider l’accord']);
+    ok.addEventListener('click',function(){ if(!dirty){ alert('Veuillez signer dans le cadre d’abord.'); return; } state.quote.signature={ data:cv.toDataURL('image/png'), date:new Date().toLocaleDateString('fr-BE') }; save(); closeSig(); render(); });
+    var clr=el('button',{class:'btn subtle'},['Effacer']); clr.addEventListener('click',function(){ ctx.clearRect(0,0,cv.width,cv.height); dirty=false; });
+    var cancel=el('button',{class:'btn ghost'},['Fermer']); cancel.addEventListener('click',closeSig);
+    row.appendChild(ok); row.appendChild(clr); row.appendChild(cancel); panel.appendChild(row);
+    panel.appendChild(el('div',{class:'share-foot'},['Capture visuelle d’accord intégrée au PDF — pas une signature électronique à valeur légale.']));
+    back.appendChild(panel); back.addEventListener('click',function(e){ if(e.target===back) closeSig(); });
+    document.body.appendChild(back);
+  }
   function renderClientView(){
     var co=state.company, q=state.quote, t=computeTotals();
     var dateStr = q.date? new Date(q.date+'T00:00').toLocaleDateString('fr-BE') : new Date().toLocaleDateString('fr-BE');
@@ -1867,7 +1894,8 @@
     var tg=el('button',{class:'btn subtle'},[state.ui.clientPrices?'Masquer les prix':'Afficher les prix']); tg.addEventListener('click',function(){ state.ui.clientPrices=!state.ui.clientPrices; save(); render(); });
     var pr=el('button',{class:'btn primary'},['🖨 Imprimer le devis + plan']); pr.addEventListener('click',function(){ buildPrint(); window.print(); });
     var sh=el('button',{class:'btn primary'},['📤 Partager au client (lien + QR)']); sh.addEventListener('click', openShareModal);
-    bar.appendChild(back); bar.appendChild(tg); bar.appendChild(pr); bar.appendChild(sh); box.appendChild(bar);
+    var sg=el('button',{class:'btn subtle'},[q.signature&&q.signature.data?'✍ Signature enregistrée ✓':'✍ Faire signer (bon pour accord)']); sg.addEventListener('click', openSignatureModal);
+    bar.appendChild(back); bar.appendChild(tg); bar.appendChild(pr); bar.appendChild(sh); bar.appendChild(sg); box.appendChild(bar);
 
     var cv=el('div',{class:'cv'});
     var head=el('div',{class:'cv-head'});
