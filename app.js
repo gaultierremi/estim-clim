@@ -75,9 +75,28 @@
       projectType:'clim', incomeCat:'none', annualKwh:0,
       rooms:[ newRoom('Séjour') ],
       outdoorId:null, extraLines:[], remise:0, signature:null,
-      compare:{ oldAnnual:0, newAnnual:0 }
+      compare:{ oldAnnual:0, newAnnual:0 }, variants:[]
     };
   }
+  function snapshotQuote(){ var c=JSON.parse(JSON.stringify(state.quote)); delete c.variants; delete c.signature; return c; }
+  function computeForQuote(snap){
+    var cur=state.quote; state.quote=Object.assign({variants:[]}, snap);
+    var t, f; try{ t=computeTotals(); f=computeFinance(); }finally{ state.quote=cur; }
+    return {tvac:t.tvac, prime:f.prime.amount, reste:f.reste, pmt:f.pmt};
+  }
+  function saveVariant(name){
+    state.quote.variants = state.quote.variants||[];
+    if(state.quote.variants.length>=3){ alert('Maximum 3 variantes. Supprime-en une d’abord.'); return; }
+    state.quote.variants.push({id:UID(), name:name||('Variante '+(state.quote.variants.length+1)), snap:snapshotQuote()});
+    save(); render();
+  }
+  function activateVariant(v){
+    if(!confirm('Activer la variante « '+v.name+' » ? La configuration courante sera remplacée (mémorise-la d’abord si besoin).')) return;
+    var keep=state.quote.variants||[];
+    state.quote=JSON.parse(JSON.stringify(v.snap)); state.quote.variants=keep;
+    save(); render();
+  }
+  function deleteVariant(id){ state.quote.variants=(state.quote.variants||[]).filter(function(v){return v.id!==id;}); save(); render(); }
   function newRoom(name){
     return {id:UID(), name:name||'Pièce', surface:20, height:2.5, ori:'sud', glz:'moyen', iso:'moyenne', roof:false, occ:2, charge:'aucune', productId:null, liaisonM:null, tech:newTech()};
   }
@@ -826,6 +845,33 @@
     gc.appendChild(cmpField('Coût annuel — neuf (estimé)','newAnnual'));
     p4.appendChild(gc); p4.appendChild(resHost); renderCmpRes();
     c4.appendChild(p4); left.appendChild(c4);
+
+    // Variantes (éco / standard / premium)
+    state.quote.variants = state.quote.variants || [];
+    var vcard=el('div',{class:'card',style:'margin-top:18px'}); var pv=el('div',{class:'pad'});
+    pv.appendChild(el('div',{class:'eyebrow'},['Closing']));
+    pv.appendChild(el('h2',{class:'section-title'},['Variantes (éco / standard / premium)']));
+    pv.appendChild(el('p',{class:'section-sub'},['Mémorise jusqu’à 3 configurations et compare-les côte à côte. Le client choisit, tu l’actives.']));
+    var vrow=el('div',{style:'display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center'});
+    var vName=el('input',{type:'text',placeholder:'Nom (ex. Éco)',style:'max-width:180px'});
+    var vSave=el('button',{class:'btn subtle sm'},['＋ Mémoriser la config actuelle']); vSave.addEventListener('click',function(){ saveVariant(vName.value.trim()); });
+    vrow.appendChild(vName); vrow.appendChild(vSave); pv.appendChild(vrow);
+    if(state.quote.variants.length){
+      var vgrid=el('div',{class:'grid',style:'grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:12px'});
+      state.quote.variants.forEach(function(v){
+        var r=computeForQuote(v.snap);
+        var headline=(r.prime>0 && r.reste>0)? r.reste : r.tvac;
+        var cc=el('div',{style:'border:1px solid var(--line);border-radius:10px;padding:12px'});
+        cc.appendChild(el('div',{style:'font-weight:800;margin-bottom:6px'},[v.name]));
+        cc.appendChild(el('div',{class:'num',style:'font-size:18px;font-weight:850;color:var(--cool-deep)'},[euro.format(headline)]));
+        cc.appendChild(el('div',{class:'section-sub',style:'font-size:11.5px'},['TVAC '+euro.format(r.tvac)+(r.prime>0?(' · prime −'+euro.format(r.prime)):'')+(r.pmt>0?(' · '+euro2.format(r.pmt)+'/mois'):'')]));
+        var act=el('button',{class:'btn primary sm',style:'margin-top:8px'},['Activer']); act.addEventListener('click',function(){ activateVariant(v); });
+        var del=el('button',{class:'btn danger sm',style:'margin-top:8px;margin-left:6px'},['✕']); del.addEventListener('click',function(){ deleteVariant(v.id); });
+        cc.appendChild(act); cc.appendChild(del); vgrid.appendChild(cc);
+      });
+      pv.appendChild(vgrid);
+    }
+    vcard.appendChild(pv); left.appendChild(vcard);
 
     wrap.appendChild(left);
 
