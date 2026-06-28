@@ -250,6 +250,12 @@
   .itin-visit-wrap{display:inline-flex; align-items:center; gap:3px}
   .itin-visit{width:56px}
   .itin-visit-u{font-size:11px; color:var(--muted)}
+  .itin-contact{display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:6px}
+  .cbtn{display:inline-flex; align-items:center; justify-content:center; min-width:32px; height:30px; padding:0 8px; font:inherit; font-size:14px; border:1px solid var(--line); background:#fff; border-radius:8px; cursor:pointer; text-decoration:none; color:var(--ink)}
+  .cbtn:hover{border-color:var(--cool)}
+  .itin-status{font-size:12px; padding:5px 6px; border-radius:8px}
+  .itin-status.status-RDV-pris{border-color:#c7e6d3; background:var(--good-wash); color:#23603f}
+  .itin-status.status-devis-fait{border-color:var(--cool); background:var(--cool-wash); color:var(--cool-deep)}
 
   /* Technique / pose */
   .badge-confirm{ display:inline-block; margin-left:6px; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:#6b4408; background:var(--warm-wash); border:1px solid #f0d8ad; border-radius:999px; padding:1px 7px; vertical-align:middle }

@@ -47,10 +47,17 @@
       plan: newPlan(),
       savedQuotes:[],
       tour: newTour(),
+      tourMsg: newTourMsg(),
       ui:{ tab:'home', adminSection:'societe', clientPrices:true, clientView:false, planSel:null }
     };
   }
   function newTour(){ return { date:new Date().toISOString().slice(0,10), startTime:'08:30', baseAddr:'', baseLatLng:null, defaultVisitMin:45, avgKmh:50, stops:[], order:[], legs:[] }; }
+  function newTourMsg(){ return {
+    subject:'Proposition de rendez-vous — {societe}',
+    body:'Bonjour {nom},\n\nJe vous contacte de la part de {societe} au sujet de votre projet de climatisation. Je serais disponible {creneau} pour passer faire un devis gratuit, sans engagement.\n\nEst-ce que cela vous conviendrait ?\n\nBien à vous,\n{societe}'
+  }; }
+  function ensureTourMsg(){ if(!state.tourMsg || typeof state.tourMsg!=='object') state.tourMsg=newTourMsg(); var d=newTourMsg(); if(state.tourMsg.subject==null) state.tourMsg.subject=d.subject; if(state.tourMsg.body==null) state.tourMsg.body=d.body; return state.tourMsg; }
+  var TOUR_STATUS=[['à contacter','À contacter'],['contacté','Contacté'],['RDV pris','RDV pris'],['devis fait','Devis fait']];
   function newStop(o){ o=o||{}; return { id:UID(), name:o.name||'', addr:o.addr||'', phone:o.phone||'', email:o.email||'', note:o.note||'', latLng:null, visitMin:null, status:'à contacter', devisId:null }; }
   function ensureTour(){
     if(!state.tour || typeof state.tour!=='object') state.tour=newTour();
@@ -143,6 +150,7 @@
     if(Array.isArray(s.savedQuotes)) d.savedQuotes = s.savedQuotes;
     d.savedQuotes.forEach(function(sq){ if(sq && sq.data) ensureQuoteTech(sq.data); });
     if(s.tour) d.tour = Object.assign(newTour(), s.tour);
+    if(s.tourMsg) d.tourMsg = Object.assign(newTourMsg(), s.tourMsg);
     return d;
   }
   var saveTimer;
@@ -400,7 +408,7 @@
     T.stops.forEach(function(s,idx){
       if(!s.latLng) return;
       var m=L.marker([s.latLng.lat,s.latLng.lng],{draggable:true,title:s.name||('Arrêt '+(idx+1))}).addTo(map);
-      m.bindPopup('<b>'+escapeHtml(s.name||('Arrêt '+(idx+1)))+'</b><br>'+escapeHtml(s.addr||''));
+      m.bindPopup('<b>'+escapeHtml(s.name||('Arrêt '+(idx+1)))+'</b><br>'+escapeHtml(s.addr||'')+'<br><i>'+escapeHtml(s.status||'à contacter')+'</i>');
       m.on('dragend',function(){ var ll=m.getLatLng(); s.latLng={lat:ll.lat,lng:ll.lng}; s.geoFail=false; save(); });
       pts.push([s.latLng.lat,s.latLng.lng]);
     });
@@ -467,12 +475,31 @@
     else { var seq=orderedStops(), pts=[]; if(T.baseLatLng) pts.push([T.baseLatLng.lat,T.baseLatLng.lng]); seq.forEach(function(s){pts.push([s.latLng.lat,s.latLng.lng]);}); if(pts.length>1) tourRouteLayer=L.polyline(pts,{color:'#0e9aa8',weight:3,opacity:.7,dashArray:'6 6'}).addTo(tourMap); }
   }
   function refreshItin(){ if(tourItinHost){ tourItinHost.innerHTML=''; tourItinHost.appendChild(buildItinerary()); } drawRoute(); }
+  function frDate(iso){ var p=String(iso||'').split('-'); return p.length===3?(p[2]+'/'+p[1]):iso; }
+  function stopSlotText(row){ var T=state.tour, d=T.date?frDate(T.date):''; return (d?('le '+d+' '):'')+'entre '+fmtHM(row.arrive)+' et '+fmtHM(row.depart); }
+  function tourMsgFill(tpl, stop, slot){ var co=state.company.name||'votre installateur'; return String(tpl||'').replace(/\{nom\}/g, stop.name||'').replace(/\{creneau\}/g, slot||'').replace(/\{societe\}/g, co); }
+  function telHref(phone){ return 'tel:'+String(phone||'').replace(/[^+\d]/g,''); }
   function optimizeAndRoute(statusEl){
     if(state.tour.stops.filter(function(s){return s.latLng;}).length<1){ alert('Géocode au moins un arrêt avant d’optimiser.'); return; }
     optimizeOrder(); computeLegsHaversine(); save(); refreshItin();
     if(statusEl) statusEl.textContent='Itinéraire optimisé (durées à vol d’oiseau). Calcul routier…';
     fetchOSRM().then(function(okk){ if(statusEl) statusEl.textContent=okk?'Durées routières (OSRM) appliquées.':'OSRM indisponible — durées estimées à vol d’oiseau.'; save(); refreshItin(); })
       .catch(function(){ if(statusEl) statusEl.textContent='OSRM indisponible — durées estimées à vol d’oiseau.'; });
+  }
+  function buildContactRow(s, row){
+    var slot=stopSlotText(row); var msg=ensureTourMsg();
+    var body=tourMsgFill(msg.body, s, slot), subj=tourMsgFill(msg.subject, s, slot);
+    var wrap=el('div',{class:'itin-contact'});
+    if(s.phone){ var a=el('a',{class:'cbtn',href:telHref(s.phone),title:'Appeler'},['📞']); wrap.appendChild(a); }
+    if(s.email){ var ml=el('a',{class:'cbtn',title:'Écrire un email',href:'mailto:'+encodeURIComponent(s.email)+'?subject='+encodeURIComponent(subj)+'&body='+encodeURIComponent(body)},['✉️']); wrap.appendChild(ml); }
+    if(s.phone){ var sm=el('a',{class:'cbtn',title:'SMS',href:'sms:'+String(s.phone).replace(/[^+\d]/g,'')+'?body='+encodeURIComponent(body)},['💬']); wrap.appendChild(sm); }
+    var cp=el('button',{class:'cbtn',title:'Copier le message'},['📋']);
+    cp.addEventListener('click',function(){ function okF(){ cp.textContent='✓'; setTimeout(function(){cp.textContent='📋';},1200); } if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(body).then(okF,function(){alert(body);}); else alert(body); });
+    wrap.appendChild(cp);
+    var sel=el('select',{class:'itin-status status-'+(s.status||'').replace(/\s/g,'-')}); TOUR_STATUS.forEach(function(o){ sel.appendChild(opt(o[0],o[1],s.status===o[0])); });
+    sel.addEventListener('change',function(){ s.status=sel.value; save(); refreshItin(); });
+    wrap.appendChild(sel);
+    return wrap;
   }
   function buildItinerary(){
     var T=state.tour, seq=orderedStops();
@@ -488,6 +515,7 @@
       mid.appendChild(el('div',{class:'itin-name'},[s.name||('Arrêt '+(i+1))]));
       mid.appendChild(el('div',{class:'itin-addr'},[s.addr||'']));
       mid.appendChild(el('div',{class:'itin-time'},['🚗 '+fmtDur(row.travel)+' · arrivée '+fmtHM(row.arrive)+' → départ '+fmtHM(row.depart)]));
+      mid.appendChild(buildContactRow(s, row));
       var ctrl=el('div',{class:'itin-ctrl'});
       var vis=el('input',{type:'number',min:'0',step:'5',class:'itin-visit',title:'Durée de visite (min)'}); vis.value=(s.visitMin!=null&&s.visitMin!=='')?s.visitMin:(+T.defaultVisitMin||0);
       vis.addEventListener('change',function(){ s.visitMin=vis.value===''?null:Math.max(0,+vis.value); save(); refreshItin(); });
@@ -521,7 +549,7 @@
     tbl.appendChild(tb); wrap.appendChild(tbl); return wrap;
   }
   function renderTournee(){
-    ensureTour(); var T=state.tour;
+    ensureTour(); ensureTourMsg(); var T=state.tour;
     if(!T.baseAddr && state.company.addr) T.baseAddr=state.company.addr;
     var box=el('div');
     box.appendChild(el('div',{class:'eyebrow'},['Tournée']));
@@ -935,7 +963,7 @@
   /* ============================================================
      ADMIN VIEW
      ============================================================ */
-  var ADMIN_SECTIONS=[['societe','Société'],['interieures','Unités intérieures'],['exterieurs','Groupes extérieurs'],['mainoeuvre','Main-d\u2019œuvre'],['prestations','Prestations'],['primes','Primes & finances'],['sauvegardes','Sauvegardes & devis']];
+  var ADMIN_SECTIONS=[['societe','Société'],['interieures','Unités intérieures'],['exterieurs','Groupes extérieurs'],['mainoeuvre','Main-d\u2019œuvre'],['prestations','Prestations'],['primes','Primes & finances'],['messages','Messages tournée'],['sauvegardes','Sauvegardes & devis']];
   function renderAdmin(){
     var wrap=el('div');
     var nav=el('div',{class:'subnav'});
@@ -952,8 +980,20 @@
     else if(sec==='mainoeuvre') wrap.appendChild(adminMainOeuvre());
     else if(sec==='prestations') wrap.appendChild(adminPrestations());
     else if(sec==='primes') wrap.appendChild(adminPrimesFinances());
+    else if(sec==='messages') wrap.appendChild(adminMessages());
     else wrap.appendChild(adminSauvegardes());
     return wrap;
+  }
+  function adminMessages(){
+    ensureTourMsg(); var m=state.tourMsg;
+    var c=el('div',{class:'card'}); var p=el('div',{class:'pad'});
+    p.appendChild(el('div',{class:'eyebrow'},['Tournée']));
+    p.appendChild(el('h2',{class:'section-title'},['Modèle de message de prospection']));
+    p.appendChild(el('p',{class:'section-sub'},['Pré-remplit les emails / SMS depuis la tournée. Variables disponibles : {nom}, {creneau}, {societe}. L’app ouvre votre messagerie ou téléphone via un lien — elle n’envoie rien à votre place et il n’y a pas d’envoi groupé automatique.']));
+    p.appendChild(textField('Objet (email)', m.subject, '', function(v){ m.subject=v; save(); }));
+    var ta=el('textarea',{style:'width:100%;min-height:170px;margin-top:10px'}); ta.value=m.body; ta.addEventListener('input',function(){ m.body=ta.value; save(); });
+    p.appendChild(el('label',{class:'field',style:'margin-top:10px'},[el('span',null,['Message']), ta]));
+    c.appendChild(p); return c;
   }
 
   function placeholderBanner(){
