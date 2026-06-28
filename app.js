@@ -75,9 +75,14 @@
       projectType:'clim', incomeCat:'none', annualKwh:0,
       rooms:[ newRoom('Séjour') ],
       outdoorId:null, extraLines:[], remise:0, signature:null,
-      compare:{ oldAnnual:0, newAnnual:0 }, variants:[]
+      compare:{ oldAnnual:0, newAnnual:0 }, variants:[], visit:newVisit()
     };
   }
+  function newVisit(){ return {
+    tableauElec:'', sectionDispo:'', accesFacade:'', typeMur:'', emplacementGroupe:'', obstacles:'', systemeExistant:'',
+    existing:{ marque:'', modele:'', type:'', annee:'' }, notes:''
+  }; }
+  function ensureVisit(q){ if(!q.visit||typeof q.visit!=='object') q.visit=newVisit(); var d=newVisit(); for(var k in d){ if(q.visit[k]==null) q.visit[k]=d[k]; } if(!q.visit.existing||typeof q.visit.existing!=='object') q.visit.existing=newVisit().existing; return q.visit; }
   function snapshotQuote(){ var c=JSON.parse(JSON.stringify(state.quote)); delete c.variants; delete c.signature; return c; }
   function computeForQuote(snap){
     var cur=state.quote; state.quote=Object.assign({variants:[]}, snap);
@@ -2404,6 +2409,15 @@
     s+='<text x="'+(MX(e.holeX)+hr+2)+'" y="'+(MY(e.holeY)+4)+'" font-size="10" fill="#bf4631" font-weight="700">Ø'+e.holeD+'</text>';
     s+='</svg>'; return s;
   }
+  function fichePoseVisitHTML(){
+    var v=ensureVisit(state.quote); var rows=[];
+    ['tableauElec','sectionDispo','accesFacade','typeMur','systemeExistant','emplacementGroupe','obstacles'].forEach(function(k){
+      var val = (k==='emplacementGroupe'||k==='obstacles') ? v[k] : visitValLabel(k, v[k]);
+      if(val) rows.push('<tr><td class="fp-k">'+VISIT_LABELS[k]+'</td><td>'+escapeHtml(val)+'</td></tr>');
+    });
+    if(!rows.length) return '';
+    return '<div class="pd-section-label">Relevé de visite</div><table class="pd-table fp-table"><tbody>'+rows.join('')+'</tbody></table>';
+  }
   function buildFichePose(){
     var co=state.company, q=state.quote, s=computeTechSynthesis();
     var dateStr=q.date?new Date(q.date+'T00:00').toLocaleDateString('fr-BE'):new Date().toLocaleDateString('fr-BE');
@@ -2414,6 +2428,7 @@
       '<div class="pd-meta"><b>FICHE DE POSE</b><br>Date : '+dateStr+'<br><br>'+(q.client.name?'<b>'+escapeHtml(q.client.name)+'</b><br>':'')+(q.client.addr?escapeHtml(q.client.addr)+'<br>':'')+(q.client.phone?escapeHtml(q.client.phone):'')+'</div></div>';
     html+='<div class="pd-section-label">Fiche de pose — relevé technique</div>';
     html+='<div class="fp-banner">Relevé de pose — à valider sur site par l’installateur certifié et l’électricien. Dimensionnement électrique, charge de réfrigérant et perçages sous leur responsabilité.</div>';
+    html+=fichePoseVisitHTML();
     if(!(q.rooms&&q.rooms.length)) html+='<p style="color:#8499a1">Aucune unité au devis.</p>';
     q.rooms.forEach(function(r){
       ensureRoomTech(r); var tech=r.tech, prod=getProduct(r.productId);
@@ -2544,12 +2559,35 @@
     }
     rebuild();
   }
+  function buildVisitCard(){
+    var v=ensureVisit(state.quote);
+    var c=el('div',{class:'card',style:'margin-bottom:16px'}); var p=el('div',{class:'pad'});
+    p.appendChild(el('div',{class:'eyebrow'},['Relevé de visite']));
+    p.appendChild(el('h2',{class:'section-title',style:'font-size:15px'},['Check-list sur site']));
+    p.appendChild(el('p',{class:'section-sub'},['Reporté dans la fiche de pose pour l’installateur.']));
+    var g=el('div',{class:'grid g3',style:'margin-top:12px'});
+    function vsel(label,key,opts){ return selFieldV(label, v[key], opts, function(val){ v[key]=val; save(); }); }
+    function vtxt(label,key,ph){ var i=el('input',{type:'text'}); i.value=v[key]||''; if(ph)i.placeholder=ph; i.addEventListener('input',function(){ v[key]=i.value; save(); }); return el('label',{class:'field'},[el('span',null,[label]),i]); }
+    g.appendChild(vsel('Tableau élec. présent','tableauElec',[['','—'],['oui','Oui'],['non','Non'],['avérifier','À vérifier']]));
+    g.appendChild(vsel('Section dispo','sectionDispo',[['','—'],['oui','Oui'],['non','Non'],['avérifier','À vérifier']]));
+    g.appendChild(vsel('Accès façade','accesFacade',[['','—'],['facile','Facile'],['moyen','Moyen'],['difficile','Difficile']]));
+    g.appendChild(vsel('Type de mur','typeMur',[['','—'],['brique','Brique'],['beton','Béton'],['ossature','Ossature bois'],['autre','Autre']]));
+    g.appendChild(vsel('Système existant','systemeExistant',[['','—'],['aucun','Aucun'],['clim','Clim'],['chauffage','Chauffage'],['autre','Autre']]));
+    g.appendChild(vtxt('Emplacement groupe ext.','emplacementGroupe','ex. façade arrière, sol'));
+    p.appendChild(g);
+    p.appendChild(vtxt('Obstacles / contraintes','obstacles','ex. accès échelle, copropriété, mitoyenneté'));
+    c.appendChild(p); return c;
+  }
+  function selFieldV(label,val,options,on){ var s=el('select'); options.forEach(function(o){ s.appendChild(opt(o[0],o[1],o[0]===val)); }); s.addEventListener('change',function(){on(s.value);}); return el('label',{class:'field'},[el('span',null,[label]),s]); }
+  var VISIT_LABELS={ tableauElec:'Tableau élec. présent', sectionDispo:'Section dispo', accesFacade:'Accès façade', typeMur:'Type de mur', systemeExistant:'Système existant', emplacementGroupe:'Emplacement groupe ext.', obstacles:'Obstacles' };
+  function visitValLabel(key,val){ if(!val) return ''; var maps={ tableauElec:{oui:'Oui',non:'Non',avérifier:'À vérifier'}, sectionDispo:{oui:'Oui',non:'Non',avérifier:'À vérifier'}, accesFacade:{facile:'Facile',moyen:'Moyen',difficile:'Difficile'}, typeMur:{brique:'Brique',beton:'Béton',ossature:'Ossature bois',autre:'Autre'}, systemeExistant:{aucun:'Aucun',clim:'Clim',chauffage:'Chauffage',autre:'Autre'} }; return (maps[key]&&maps[key][val])||val; }
   function renderTechnique(){
     var box=el('div');
     box.appendChild(el('div',{class:'eyebrow'},['Pose']));
     box.appendChild(el('h2',{class:'section-title',style:'margin-bottom:10px'},['Relevé technique de pose']));
     box.appendChild(techValidationBanner());
     box.appendChild(techToolbar());
+    box.appendChild(buildVisitCard());
     if(!(state.quote.rooms&&state.quote.rooms.length)){ box.appendChild(el('p',{class:'section-sub'},['Aucune pièce dans le devis. Ajoute des pièces dans l’onglet Devis pour relever la pose.'])); return box; }
     var layout=el('div',{class:'layout'});
     var main=el('div');
