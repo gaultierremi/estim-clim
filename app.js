@@ -3090,7 +3090,7 @@
       '<div class="ar-stats" id="arPlaceStats">Recherche d\u2019un mur…</div>'+
       seg+
       '<div class="ar-cross"></div>'+
-      '<div class="ar-bottom"><button class="ar-btn ghost" id="arpUndo">↶ Retirer</button><button class="ar-btn ghost" id="arpClear">Tout effacer</button><button class="ar-btn danger" id="arpQuit">✕ Quitter</button></div>';
+      '<div class="ar-bottom"><button class="ar-btn ghost" id="arpOcc" style="display:none" aria-pressed="true">⛰ Occlusion</button><button class="ar-btn ghost" id="arpUndo">↶ Retirer</button><button class="ar-btn ghost" id="arpClear">Tout effacer</button><button class="ar-btn danger" id="arpQuit">✕ Quitter</button></div>';
     return o;
   }
   // Convention commune : face de montage à z=0, extrusion vers +Z. La pose aligne +Z sur la normale
@@ -3133,6 +3133,7 @@
 
     var renderer, scene, camera, reticle, session=null, hitTestSource=null, refSpace=null;
     var placed=[], lastStats='';
+    var depthActive=false, occlusionOn=true;   // AR1 : occlusion par profondeur (ARCore), si dispo
     var validTypes={mural:1,cassette:1,console:1,outdoor:1};
     var currentType=(opts.type && validTypes[opts.type]) ? opts.type : 'mural';
 
@@ -3187,7 +3188,11 @@
     function undo(){ var u=placed.pop(); if(u) scene.remove(u); updateStats(); }
     function clearAll(){ placed.forEach(function(u){ scene.remove(u); }); placed=[]; updateStats(); }
 
-    navigator.xr.requestSession('immersive-ar', { requiredFeatures:['hit-test'], optionalFeatures:['dom-overlay'], domOverlay:{ root: overlay } })
+    // Features optionnelles : la session démarre même si le casque/téléphone ne les supporte pas (repli propre).
+    var sessReq={ requiredFeatures:['hit-test'], optionalFeatures:['dom-overlay','depth-sensing'], domOverlay:{ root: overlay },
+      depthSensing:{ usagePreference:['cpu-optimized'], dataFormatPreference:['luminance-alpha','float32'] } };
+    navigator.xr.requestSession('immersive-ar', sessReq)
+      .catch(function(){ return navigator.xr.requestSession('immersive-ar', { requiredFeatures:['hit-test'], optionalFeatures:['dom-overlay'], domOverlay:{ root: overlay } }); })
       .then(function(s){ session=s; renderer.xr.setReferenceSpaceType('local'); return renderer.xr.setSession(s); })
       .then(function(){
         session.addEventListener('select', placeUnit);
@@ -3196,10 +3201,13 @@
           if(session.requestHitTestSource) session.requestHitTestSource({space:v}).then(function(src){ hitTestSource=src; });
         });
         refSpace=renderer.xr.getReferenceSpace();
+        depthActive = !!(session.depthUsage || session.depthDataFormat); // AR1 : depth-sensing accordé ?
         var ub=overlay.querySelector('#arpUndo'), cb=overlay.querySelector('#arpClear'), qb=overlay.querySelector('#arpQuit');
         if(ub) ub.onclick=undo;
         if(cb) cb.onclick=clearAll;
         if(qb) qb.onclick=function(){ try{ if(session) session.end(); }catch(e){ cleanup(); } };
+        var oc=overlay.querySelector('#arpOcc');
+        if(oc){ if(depthActive){ oc.style.display=''; oc.onclick=function(){ occlusionOn=!occlusionOn; oc.setAttribute('aria-pressed', occlusionOn); if(!occlusionOn) placed.forEach(function(u){u.visible=true;}); }; oc.setAttribute('aria-pressed', occlusionOn); } else oc.style.display='none'; }
         renderer.setAnimationLoop(loop); updateStats();
       })
       .catch(function(err){
@@ -3207,6 +3215,33 @@
         alert('Impossible de démarrer l\u2019AR : '+(err&&err.message||err)+'\n\nVérifie : Chrome à jour, « Google Play Services for AR » installé, et accès via une adresse https.');
       });
 
+    // AR1 — occlusion par profondeur (par objet, robuste et garde-fou) : on masque une unité
+    // si la surface réelle devant elle (depth ARCore) est plus proche que l'unité. Approximation
+    // par objet (pas par pixel) ; désactivable. Profondeur = estimée, pas une mesure certifiée.
+    function applyOcclusion(frame){
+      if(!depthActive || !occlusionOn || !placed.length) return;
+      try{
+        var vp=frame.getViewerPose(refSpace); if(!vp || !vp.views.length) return;
+        var view=vp.views[0];
+        var depth=frame.getDepthInformation ? frame.getDepthInformation(view) : null; if(!depth || !depth.getDepthInMeters) return;
+        var camPos=new THREE.Vector3().fromArray(view.transform.position ? [view.transform.position.x,view.transform.position.y,view.transform.position.z] : [0,0,0]);
+        var vpm=new THREE.Matrix4().fromArray(view.projectionMatrix);
+        var inv=new THREE.Matrix4().fromArray(view.transform.inverse.matrix);
+        var mvp=new THREE.Matrix4().multiplyMatrices(vpm, inv);
+        placed.forEach(function(u){
+          var wp=u.position;
+          var ndc=new THREE.Vector3(wp.x,wp.y,wp.z).applyMatrix4(mvp); // clip→ndc (w divide via applyMatrix4 Vector3)
+          if(ndc.z<-1||ndc.z>1){ u.visible=true; return; }
+          var nx=(ndc.x*0.5+0.5), ny=(1-(ndc.y*0.5+0.5));
+          if(nx<0||nx>1||ny<0||ny>1){ u.visible=true; return; }
+          var real;
+          try{ real=depth.getDepthInMeters(nx,ny); }catch(_){ u.visible=true; return; }
+          if(!(real>0)){ u.visible=true; return; }
+          var dist=wp.distanceTo(camPos);
+          u.visible = (dist <= real + 0.15); // marge 15 cm
+        });
+      }catch(e){ placed.forEach(function(u){u.visible=true;}); }
+    }
     function loop(t, frame){
       if(frame && hitTestSource){
         if(!refSpace) refSpace=renderer.xr.getReferenceSpace();
@@ -3215,6 +3250,7 @@
         else reticle.visible=false;
         updateStats();
       }
+      if(frame) applyOcclusion(frame);
       try{ renderer.render(scene,camera); }catch(e){}
     }
     function cleanup(){

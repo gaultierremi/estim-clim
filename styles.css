@@ -283,6 +283,7 @@
   .ar-bottom{ position:absolute; bottom:0; left:0; right:0; padding:18px 16px calc(18px + env(safe-area-inset-bottom)); display:flex; gap:10px; justify-content:center; pointer-events:auto }
   .ar-btn{ font:inherit; font-weight:700; font-size:14px; border:none; border-radius:13px; padding:14px 18px; cursor:pointer }
   .ar-btn.primary{ background:#0e9aa8; color:#04282b } .ar-btn.ghost{ background:rgba(255,255,255,.92); color:#0f1b24 } .ar-btn.danger{ background:#bf4631; color:#fff }
+  .ar-btn.ghost[aria-pressed=true]{ background:#0e9aa8; color:#04282b }
 
   /* Partage : modale QR */
   .share-modal{ position:fixed; inset:0; z-index:1100; background:rgba(15,27,36,.55); display:flex; align-items:center; justify-content:center; padding:18px }
