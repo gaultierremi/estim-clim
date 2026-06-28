@@ -852,7 +852,9 @@
     var prodSel=el('select');
     rebuildProductOptions(prodSel, r);
     prodSel.addEventListener('change',function(){ r.productId=prodSel.value||null; refreshRoom(card,r); refreshDevis(); save(); });
-    var prodWrap=el('label',{class:'field'},[el('span',null,['Unité intérieure (catalogue)']), prodSel]);
+    var dsHost=el('div',{style:'margin-top:6px'});
+    var prodWrap=el('label',{class:'field'},[el('span',null,['Unité intérieure (catalogue)']), prodSel, dsHost]);
+    card._dsHost=dsHost;
 
     var result=el('div',{class:'room-result'});
     var resKW=el('div',{class:'kw num'});
@@ -897,7 +899,14 @@
       msg = 'Unité conseillée : <b>'+fmtKw(c.reco)+'</b>'+(c.kW>7.1?' — pièce volumineuse, envisager 2 unités/gainable.':'');
     }
     card._reco.innerHTML = msg;
+    if(card._dsHost){ card._dsHost.innerHTML=''; var dl=datasheetLink(p); if(dl) card._dsHost.appendChild(dl); }
     card._bd.textContent = (+r.surface||0)+' m² × '+c.base+' W/m² × expo '+c.oriF+' × vitrage '+c.glzF + (c.roofF>1?' × toiture '+c.roofF:'') + (c.heightF>1?' × h '+c.heightF.toFixed(2):'') + (c.occ>0?' + '+c.occ+'W occ.':'') + (c.charge>0?' + '+c.charge+'W charges':'');
+  }
+  function datasheetLink(prod){
+    if(!prod || !prod.datasheet) return null;
+    var ds=String(prod.datasheet).trim(); if(!ds) return null;
+    if(/^https?:\/\//i.test(ds)) return el('a',{class:'btn subtle sm',href:ds,target:'_blank',rel:'noopener'},['📄 Fiche technique']);
+    return el('div',{class:'section-sub',style:'font-size:12px'},['📄 Fiche technique : '+ds]);
   }
   function reindexRooms(){ document.querySelectorAll('#roomsBox .room').forEach(function(c,i){ c._idx.textContent=i+1; }); }
 
@@ -1186,7 +1195,8 @@
     ['Ø liquide','diamLiquide','text','1/4'],['Ø gaz','diamGaz','text','3/8'],
     ['Liaison incluse (m)','liaisonBaseLen','number','',0.5],['Liaison max (m)','liaisonMaxLen','number','',0.5],
     ['Dénivelé max (m)','denivMax','number','',0.5],['Charge add. (g/m)','chargeGM','number','',1],
-    ['Disjoncteur conseillé (note)','disjoncteur','text','ex. 16 A — à confirmer'],['Section goulotte conseillée','goulotteSectionConseillee','text','60x45']
+    ['Disjoncteur conseillé (note)','disjoncteur','text','ex. 16 A — à confirmer'],['Section goulotte conseillée','goulotteSectionConseillee','text','60x45'],
+    ['Fiche technique (URL ou réf.)','datasheet','text','https://… ou référence PDF']
   ];
   var OUTDOOR_TECH_FIELDS=[
     ['Dénivelé max (m)','denivMax','number','',0.5],['Disjoncteur conseillé (note)','disjoncteur','text','ex. 16 A — à confirmer']
@@ -1851,6 +1861,9 @@
         body.appendChild(roiBox);
       }
     }
+    var dsList=el('div',{class:'cv-legend'}); var dsSeen={};
+    q.rooms.forEach(function(r){ var p=getProduct(r.productId); if(p && p.datasheet && !dsSeen[p.id]){ dsSeen[p.id]=1; var dl=datasheetLink(p); if(dl){ dl.textContent='📄 '+p.brand+' '+p.model; dsList.appendChild(dl); } } });
+    if(dsList.children.length){ body.appendChild(el('div',{class:'total-label',style:'margin-top:16px'},['Fiches techniques'])); body.appendChild(dsList); }
     body.appendChild(el('div',{class:'cv-note'},['Climatisation réversible (pompe à chaleur air-air). TVA réduite à 6 % sur fourniture et pose appliquée. Estimation sous réserve de visite technique. '+(co.footer||'')]));
     cv.appendChild(body); box.appendChild(cv);
     return box;
