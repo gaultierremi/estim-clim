@@ -239,6 +239,18 @@
   .home-card-d{font-size:13px; color:var(--muted); line-height:1.5}
   .home-foot{text-align:center; margin-top:22px}
 
+  /* Tournée — itinéraire */
+  .itin-row{display:flex; align-items:center; gap:12px; padding:10px 0; border-bottom:1px solid var(--line)}
+  .itin-idx{width:28px; height:28px; flex:none; border-radius:8px; background:var(--cool); color:#04282b; display:grid; place-items:center; font-weight:800; font-size:13px}
+  .itin-mid{flex:1; min-width:0}
+  .itin-name{font-weight:700; font-size:14px}
+  .itin-addr{font-size:12px; color:var(--muted)}
+  .itin-time{font-size:12.5px; color:var(--cool-deep); font-variant-numeric:tabular-nums; margin-top:2px}
+  .itin-ctrl{display:flex; align-items:center; gap:6px; flex:none}
+  .itin-visit-wrap{display:inline-flex; align-items:center; gap:3px}
+  .itin-visit{width:56px}
+  .itin-visit-u{font-size:11px; color:var(--muted)}
+
   /* Technique / pose */
   .badge-confirm{ display:inline-block; margin-left:6px; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:#6b4408; background:var(--warm-wash); border:1px solid #f0d8ad; border-radius:999px; padding:1px 7px; vertical-align:middle }
   tr.tech-row > td{ background:var(--surface-2); padding:14px }

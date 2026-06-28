@@ -108,6 +108,7 @@
   var techDraft=[];      // points de la goulotte en cours de tracé (transient, non persisté)
   var lastTrouDiam=60;   // dernier Ø de trou utilisé (mm)
   var tourMap=null;      // instance Leaflet de la carte tournée (nettoyée à chaque render)
+  var tourRouteLayer=null, tourItinHost=null;
 
   var TYPES = [['mural','Murale'],['console','Console'],['cassette','Cassette plafond'],['gainable','Gainable']];
   var typeLabel = function(t){ var m={mural:'Murale',console:'Console',cassette:'Cassette',gainable:'Gainable'}; return m[t]||t; };
@@ -404,9 +405,100 @@
       pts.push([s.latLng.lat,s.latLng.lng]);
     });
     if(pts.length) map.fitBounds(pts,{padding:[34,34], maxZoom:14});
+    drawRoute();
     setTimeout(function(){ try{ map.invalidateSize(); }catch(e){} }, 60);
   }
   function geoBadge(s){ return s.latLng?'📍':(s.geoFail?'✗':'—'); }
+
+  /* ---- Itinéraire (NN + 2-opt) + durées (OSRM / repli haversine) + planning ---- */
+  function haversineKm(a,b){ var R=6371; var dLat=(b.lat-a.lat)*Math.PI/180, dLng=(b.lng-a.lng)*Math.PI/180, la1=a.lat*Math.PI/180, la2=b.lat*Math.PI/180; var s1=Math.sin(dLat/2), s2=Math.sin(dLng/2); var x=s1*s1+Math.cos(la1)*Math.cos(la2)*s2*s2; return 2*R*Math.asin(Math.sqrt(x)); }
+  function parseHM(s){ var m=String(s||'08:30').match(/(\d{1,2}):(\d{2})/); return m?(+m[1]*60 + +m[2]):510; }
+  function fmtHM(mins){ mins=Math.round(mins); var h=Math.floor(mins/60), m=((mins%60)+60)%60; return (h%24<10?'0':'')+(h%24)+':'+(m<10?'0':'')+m; }
+  function fmtDur(mins){ mins=Math.round(mins); var h=Math.floor(mins/60), m=mins%60; return h?(h+' h '+(m<10?'0':'')+m):(m+' min'); }
+  function orderedStops(){ var T=state.tour, byId={}; T.stops.forEach(function(s){byId[s.id]=s;}); return (T.order||[]).map(function(id){return byId[id];}).filter(function(s){return s&&s.latLng;}); }
+  function routeDist(route, start){ var d=0, cur=start; for(var i=0;i<route.length;i++){ if(cur) d+=haversineKm(cur,route[i].latLng); cur=route[i].latLng; } return d; }
+  function twoOpt(route, start){
+    if(route.length<3) return route; var improved=true;
+    while(improved){ improved=false;
+      for(var i=0;i<route.length-1;i++){ for(var k=i+1;k<route.length;k++){
+        var nr=route.slice(0,i).concat(route.slice(i,k+1).reverse(), route.slice(k+1));
+        if(routeDist(nr,start) < routeDist(route,start)-1e-9){ route=nr; improved=true; }
+      } }
+    }
+    return route;
+  }
+  function optimizeOrder(){
+    var T=state.tour, pts=T.stops.filter(function(s){return s.latLng;});
+    if(!pts.length){ T.order=[]; return; }
+    var start=T.baseLatLng||pts[0].latLng;
+    var remaining=pts.slice(), route=[], cur=start;
+    while(remaining.length){ var bi=0,bd=Infinity; for(var i=0;i<remaining.length;i++){ var d=haversineKm(cur,remaining[i].latLng); if(d<bd){bd=d;bi=i;} } var nx=remaining.splice(bi,1)[0]; route.push(nx); cur=nx.latLng; }
+    route=twoOpt(route, start);
+    T.order=route.map(function(s){return s.id;});
+  }
+  function computeLegsHaversine(){
+    var T=state.tour, seq=orderedStops(), hasBase=!!T.baseLatLng; T.routeGeo=null;
+    T.legs=seq.map(function(s,i){ var from=(i===0)?(hasBase?T.baseLatLng:null):seq[i-1].latLng; var km=from?haversineKm(from,s.latLng):0; return {fromId:i===0?(hasBase?'base':null):seq[i-1].id, toId:s.id, km:km, min:Math.round(km/(+T.avgKmh||50)*60)}; });
+  }
+  function fetchOSRM(){
+    var T=state.tour, seq=orderedStops(), hasBase=!!T.baseLatLng;
+    var coords=[]; if(hasBase) coords.push(T.baseLatLng); coords=coords.concat(seq.map(function(s){return s.latLng;}));
+    if(coords.length<2) return Promise.resolve(false);
+    var path=coords.map(function(c){return c.lng+','+c.lat;}).join(';');
+    return fetch('https://router.project-osrm.org/route/v1/driving/'+path+'?overview=full&geometries=geojson')
+      .then(function(r){ if(!r.ok) throw new Error('http'); return r.json(); })
+      .then(function(j){ if(!j.routes||!j.routes[0]) throw new Error('no route'); var rt=j.routes[0], legs=rt.legs||[];
+        T.legs=seq.map(function(s,i){ var idx=hasBase?i:i-1; var L=idx>=0?legs[idx]:null; return {fromId:i===0?(hasBase?'base':null):seq[i-1].id, toId:s.id, km:L?L.distance/1000:0, min:L?Math.round(L.duration/60):0}; });
+        T.routeGeo=rt.geometry||null; return true;
+      });
+  }
+  function computeSchedule(){
+    var T=state.tour, seq=orderedStops(), legs=T.legs||[];
+    var cur=parseHM(T.startTime), rows=[];
+    for(var i=0;i<seq.length;i++){ var travel=legs[i]?(+legs[i].min||0):0; var arr=cur+travel; var vis=(seq[i].visitMin!=null&&seq[i].visitMin!=='')?+seq[i].visitMin:(+T.defaultVisitMin||0); var dep=arr+vis; rows.push({stop:seq[i], arrive:arr, depart:dep, travel:travel, visit:vis, km:legs[i]?+legs[i].km||0:0}); cur=dep; }
+    return { rows:rows, end:cur, totalKm: legs.reduce(function(a,l){return a+(+l.km||0);},0), totalTravel: legs.reduce(function(a,l){return a+(+l.min||0);},0) };
+  }
+  function moveStop(id,dir){ var o=state.tour.order.slice(), idx=o.indexOf(id), j=idx+dir; if(idx<0||j<0||j>=o.length) return; var t=o[idx]; o[idx]=o[j]; o[j]=t; state.tour.order=o; computeLegsHaversine(); save(); refreshItin(); }
+  function drawRoute(){
+    if(!tourMap || typeof L==='undefined') return;
+    if(tourRouteLayer){ try{tourMap.removeLayer(tourRouteLayer);}catch(e){} tourRouteLayer=null; }
+    var T=state.tour;
+    if(T.routeGeo && T.routeGeo.coordinates){ tourRouteLayer=L.geoJSON(T.routeGeo,{style:{color:'#0e9aa8',weight:4,opacity:.8}}).addTo(tourMap); }
+    else { var seq=orderedStops(), pts=[]; if(T.baseLatLng) pts.push([T.baseLatLng.lat,T.baseLatLng.lng]); seq.forEach(function(s){pts.push([s.latLng.lat,s.latLng.lng]);}); if(pts.length>1) tourRouteLayer=L.polyline(pts,{color:'#0e9aa8',weight:3,opacity:.7,dashArray:'6 6'}).addTo(tourMap); }
+  }
+  function refreshItin(){ if(tourItinHost){ tourItinHost.innerHTML=''; tourItinHost.appendChild(buildItinerary()); } drawRoute(); }
+  function optimizeAndRoute(statusEl){
+    if(state.tour.stops.filter(function(s){return s.latLng;}).length<1){ alert('Géocode au moins un arrêt avant d’optimiser.'); return; }
+    optimizeOrder(); computeLegsHaversine(); save(); refreshItin();
+    if(statusEl) statusEl.textContent='Itinéraire optimisé (durées à vol d’oiseau). Calcul routier…';
+    fetchOSRM().then(function(okk){ if(statusEl) statusEl.textContent=okk?'Durées routières (OSRM) appliquées.':'OSRM indisponible — durées estimées à vol d’oiseau.'; save(); refreshItin(); })
+      .catch(function(){ if(statusEl) statusEl.textContent='OSRM indisponible — durées estimées à vol d’oiseau.'; });
+  }
+  function buildItinerary(){
+    var T=state.tour, seq=orderedStops();
+    var c=el('div');
+    if(!seq.length){ c.appendChild(el('p',{class:'section-sub'},['Optimise l’itinéraire pour générer le planning (arrêts géocodés requis).'])); return c; }
+    var sch=computeSchedule();
+    c.appendChild(el('div',{class:'banner info',style:'margin-bottom:10px',html:'<div><b>Journée :</b> '+seq.length+' arrêt(s) · départ '+escapeHtml(T.startTime)+' · '+techRound1(sch.totalKm)+' km · '+fmtDur(sch.totalTravel)+' de route · <b>fin estimée '+fmtHM(sch.end)+'</b></div>'}));
+    sch.rows.forEach(function(row,i){
+      var s=row.stop;
+      var item=el('div',{class:'itin-row'});
+      var idx=el('div',{class:'itin-idx'},[String(i+1)]);
+      var mid=el('div',{class:'itin-mid'});
+      mid.appendChild(el('div',{class:'itin-name'},[s.name||('Arrêt '+(i+1))]));
+      mid.appendChild(el('div',{class:'itin-addr'},[s.addr||'']));
+      mid.appendChild(el('div',{class:'itin-time'},['🚗 '+fmtDur(row.travel)+' · arrivée '+fmtHM(row.arrive)+' → départ '+fmtHM(row.depart)]));
+      var ctrl=el('div',{class:'itin-ctrl'});
+      var vis=el('input',{type:'number',min:'0',step:'5',class:'itin-visit',title:'Durée de visite (min)'}); vis.value=(s.visitMin!=null&&s.visitMin!=='')?s.visitMin:(+T.defaultVisitMin||0);
+      vis.addEventListener('change',function(){ s.visitMin=vis.value===''?null:Math.max(0,+vis.value); save(); refreshItin(); });
+      var up=el('button',{class:'btn subtle sm',title:'Monter'},['↑']); up.addEventListener('click',function(){ moveStop(s.id,-1); });
+      var dn=el('button',{class:'btn subtle sm',title:'Descendre'},['↓']); dn.addEventListener('click',function(){ moveStop(s.id,1); });
+      ctrl.appendChild(el('span',{class:'itin-visit-wrap'},[vis, el('span',{class:'itin-visit-u'},['min'])])); ctrl.appendChild(up); ctrl.appendChild(dn);
+      item.appendChild(idx); item.appendChild(mid); item.appendChild(ctrl);
+      c.appendChild(item);
+    });
+    return c;
+  }
   function stopRow(s,i){
     var tr=el('tr');
     tr.appendChild(el('td',null,[String(i+1)]));
@@ -442,8 +534,8 @@
     sp.appendChild(el('div',{class:'eyebrow'},['Journée']));
     var sg=el('div',{class:'grid g2',style:'margin-top:8px'});
     sg.appendChild(tourText('Date', T.date, 'date', function(v){T.date=v;}));
-    sg.appendChild(tourText('Heure de départ', T.startTime, 'time', function(v){T.startTime=v;}));
-    sg.appendChild(numField('Visite par défaut (min)', T.defaultVisitMin, '5', function(v){T.defaultVisitMin=Math.max(0,+v||0); save();}));
+    sg.appendChild(tourText('Heure de départ', T.startTime, 'time', function(v){T.startTime=v; refreshItin();}));
+    sg.appendChild(numField('Visite par défaut (min)', T.defaultVisitMin, '5', function(v){T.defaultVisitMin=Math.max(0,+v||0); save(); refreshItin();}));
     sg.appendChild(textField('Point de départ (base)', T.baseAddr, 'Adresse société', function(v){T.baseAddr=v; T.baseLatLng=null; save();}));
     sp.appendChild(sg); sc.appendChild(sp); box.appendChild(sc);
 
@@ -487,6 +579,20 @@
       gp.appendChild(el('div',{style:'font-size:11px;color:var(--muted);margin-top:6px'},['Carte © OpenStreetMap. Géocodage Nominatim — usage modéré (1 requête/seconde).']));
       gc.appendChild(gp); box.appendChild(gc);
       setTimeout(function(){ try{ initTourMap(mapWrap); }catch(e){ mapWrap.innerHTML='<div class="banner warn" style="margin:0"><div>Carte indisponible : '+escapeHtml(e.message)+'</div></div>'; } },0);
+
+      // Étape 4 — itinéraire & horaires
+      var ic=el('div',{class:'card',style:'margin-top:16px'}); var ip=el('div',{class:'pad'});
+      ip.appendChild(el('div',{class:'eyebrow'},['Étape 4 — itinéraire']));
+      ip.appendChild(el('h3',{class:'section-title',style:'font-size:15px'},['Ordre optimisé & planning de la journée']));
+      var irow=el('div',{style:'display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0'});
+      var iStatus=el('span',{class:'section-sub',style:'font-size:12.5px'},['']);
+      var optB=el('button',{class:'btn primary sm'},['✨ Optimiser l’itinéraire']); optB.addEventListener('click',function(){ optimizeAndRoute(iStatus); });
+      irow.appendChild(optB);
+      irow.appendChild(numField('Vitesse moyenne (km/h)', T.avgKmh, '5', function(v){ T.avgKmh=Math.max(5,+v||50); if(!T.routeGeo) computeLegsHaversine(); save(); refreshItin(); }));
+      irow.appendChild(iStatus);
+      ip.appendChild(irow);
+      tourItinHost=el('div'); tourItinHost.appendChild(buildItinerary()); ip.appendChild(tourItinHost);
+      ic.appendChild(ip); box.appendChild(ic);
     }
     return box;
   }
