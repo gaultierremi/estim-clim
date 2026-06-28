@@ -1603,7 +1603,8 @@
 
   /* ---------- print ---------- */
   document.getElementById('printBtn').addEventListener('click',function(){ buildPrint(); window.print(); });
-  function buildPrint(){
+  function buildPrint(kind){
+    var isBC=(kind==='commande');
     var t=computeTotals(), q=state.quote, co=state.company, fin=computeFinance();
     var num=co.quotePrefix+String(state.settings.quoteCounter).padStart(4,'0');
     var dateStr=q.date?new Date(q.date+'T00:00').toLocaleDateString('fr-BE'):new Date().toLocaleDateString('fr-BE');
@@ -1626,7 +1627,7 @@
     var html=
       '<div class="pd-head"><div class="pd-co">'+logoHtml+'<div class="co-name">'+escapeHtml(co.name||'Votre société')+'</div>'+
         (co.addr?escapeHtml(co.addr)+'<br>':'')+(co.phone?'Tél. '+escapeHtml(co.phone)+'  ':'')+(co.email?escapeHtml(co.email):'')+(co.vatNr?'<br>'+escapeHtml(co.vatNr):'')+'</div>'+
-        '<div class="pd-meta"><b>DEVIS '+escapeHtml(num)+'</b><br>Date : '+dateStr+'<br>Valable jusqu\'au '+valid+'<br><br>'+
+        '<div class="pd-meta"><b>'+(isBC?'BON DE COMMANDE':'DEVIS')+' '+escapeHtml(num)+'</b><br>Date : '+dateStr+(isBC?'':'<br>Valable jusqu\'au '+valid)+'<br><br>'+
           (q.client.name?'<b>'+escapeHtml(q.client.name)+'</b><br>':'')+(q.client.addr?escapeHtml(q.client.addr)+'<br>':'')+(q.client.phone?escapeHtml(q.client.phone):'')+'</div></div>'+
       '<div class="pd-section-label">Installation '+t.system+' — climatisation réversible</div>'+
       '<table class="pd-table"><thead><tr><th>Pièce</th><th>Unité intérieure</th><th class="r">Surface</th><th class="r">Besoin</th><th class="r">Prix HTVA</th></tr></thead><tbody>'+
@@ -1647,7 +1648,7 @@
       '</div>'+
       (fin.pmt>0? '<div class="pd-legal" style="border-top:none;padding-top:2px">Mensualité : simulation indicative (taux '+techRound1(fin.simRate)+' %), ce n’est pas une offre de crédit ; le financement réel passe par un partenaire agréé.</div>':'')+
       (q.signature&&q.signature.data? '<div class="pd-sign"><div class="pd-sign-lbl">Bon pour accord — '+escapeHtml(q.signature.date||'')+'</div><img src="'+q.signature.data+'" alt="signature"><div class="pd-sign-note">Signature manuscrite valant accord visuel sur le présent devis — pas une signature électronique à valeur légale.</div></div>':'')+
-      '<div class="pd-legal">'+escapeHtml(state.finance.paymentTerms||'')+(fin.prime.eligible&&fin.prime.amount>0?' '+escapeHtml(fin.prime.reason):'')+'<br>'+escapeHtml(co.footer||'')+'</div>'+
+      '<div class="pd-legal">'+(isBC?'<b>Bon de commande</b> faisant suite au devis accepté — vaut accord de réalisation. ':'')+escapeHtml(state.finance.paymentTerms||'')+(fin.prime.eligible&&fin.prime.amount>0?' '+escapeHtml(fin.prime.reason):'')+'<br>'+escapeHtml(co.footer||'')+'</div>'+
       (state.finance.cgv? '<div style="page-break-before:always"></div><div class="pd-section-label">Conditions générales</div><div class="pd-legal" style="border-top:none">'+escapeHtml(state.finance.cgv)+'</div>':'')+
       (planHasContent()? '<div style="page-break-before:always"></div><div class="pd-section-label">Plan d\'implantation</div><div style="border:1px solid #dce5e8;border-radius:8px;overflow:hidden;margin-top:4px">'+planSVGString({readonly:true})+'</div>' : '');
     document.getElementById('printDoc').innerHTML=html;
@@ -2651,6 +2652,12 @@
     });
     c.appendChild(p); return c;
   }
+  function printBonCommande(q){
+    var cur=state.quote;
+    state.quote=ensureQuoteTech(JSON.parse(JSON.stringify(q.data)));
+    try{ buildPrint('commande'); } finally{ state.quote=cur; }
+    window.print();
+  }
   function renderDash(){
     var box=el('div');
     box.appendChild(el('div',{class:'eyebrow'},['Pilotage']));
@@ -2682,7 +2689,9 @@
       sel.addEventListener('change',function(){ q.status=sel.value; save(); render(); });
       var open=el('button',{class:'btn subtle sm'},['Ouvrir']); open.addEventListener('click',function(){ state.quote=ensureQuoteTech(JSON.parse(JSON.stringify(q.data))); state.ui.tab='devis'; save(); render(); });
       var del=el('button',{class:'btn danger sm'},['✕']); del.addEventListener('click',function(){ state.savedQuotes=state.savedQuotes.filter(function(x){return x.id!==q.id;}); save(); render(); });
-      item.appendChild(sel); item.appendChild(open); item.appendChild(del);
+      item.appendChild(sel);
+      if((q.status||'')==='accepte'){ var bc=el('button',{class:'btn subtle sm'},['🧾 Bon de commande']); bc.addEventListener('click',function(){ printBonCommande(q); }); item.appendChild(bc); }
+      item.appendChild(open); item.appendChild(del);
       p.appendChild(item);
     });
     c.appendChild(p); box.appendChild(c);
