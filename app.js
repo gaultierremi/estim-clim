@@ -568,6 +568,7 @@
     sel.addEventListener('change',function(){ s.status=sel.value; save(); refreshItin(); });
     wrap.appendChild(sel);
     if(s.latLng || s.addr){ var nv=el('a',{class:'cbtn',title:'Naviguer (Google Maps)',href:'https://www.google.com/maps/dir/?api=1&destination='+gmapsDest(s)+'&travelmode=driving&dir_action=navigate',target:'_blank',rel:'noopener'},['🧭']); wrap.appendChild(nv); }
+    var cal=el('button',{class:'cbtn',title:'Ajouter le RDV au calendrier (.ics)'},['📅']); cal.addEventListener('click',function(){ downloadStopICS(s, row); }); wrap.appendChild(cal);
     var dv=el('button',{class:'cbtn',title:'Faire le devis (pré-rempli)'},[s.devisId?'📋 ✓':'📋 Devis']);
     dv.addEventListener('click',function(){ startDevisForStop(s); });
     wrap.appendChild(dv);
@@ -2657,6 +2658,27 @@
     catch(e){ alert('Téléchargement impossible : '+(e&&e.message||e)); }
   }
   function csvCell(v){ v=String(v==null?'':v); return /[";\n\r]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; }
+  function pad2(n){ return (n<10?'0':'')+n; }
+  function icsDateTime(dateISO, minutes){
+    var p=String(dateISO||'').split('-'); if(p.length!==3){ var d=new Date(); p=[d.getFullYear(), d.getMonth()+1, d.getDate()]; }
+    var h=Math.floor((+minutes||0)/60)%24, m=(+minutes||0)%60;
+    return ''+(+p[0])+pad2(+p[1])+pad2(+p[2])+'T'+pad2(h)+pad2(m)+'00';
+  }
+  function icsStamp(){ var d=new Date(); return ''+d.getUTCFullYear()+pad2(d.getUTCMonth()+1)+pad2(d.getUTCDate())+'T'+pad2(d.getUTCHours())+pad2(d.getUTCMinutes())+pad2(d.getUTCSeconds())+'Z'; }
+  function icsEscape(s){ return String(s||'').replace(/\\/g,'\\\\').replace(/([,;])/g,'\\$1').replace(/\n/g,'\\n'); }
+  function buildICS(ev){
+    return ['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Estim-clim Pro//FR','CALSCALE:GREGORIAN',
+      'BEGIN:VEVENT','UID:'+UID()+'@estimclim','DTSTAMP:'+icsStamp(),
+      'DTSTART:'+ev.start,'DTEND:'+ev.end,'SUMMARY:'+icsEscape(ev.summary),
+      (ev.location?'LOCATION:'+icsEscape(ev.location):''),
+      (ev.description?'DESCRIPTION:'+icsEscape(ev.description):''),
+      'END:VEVENT','END:VCALENDAR'].filter(Boolean).join('\r\n');
+  }
+  function downloadStopICS(s, row){
+    var ics=buildICS({ start:icsDateTime(state.tour.date, row.arrive), end:icsDateTime(state.tour.date, row.depart),
+      summary:'RDV '+(s.name||'client'), location:s.addr||'', description:[s.phone,s.email,s.note].filter(Boolean).join(' / ') });
+    downloadText(ics, 'rdv-'+String(s.name||'client').replace(/[^a-z0-9]+/ig,'_').toLowerCase()+'.ics', 'text/calendar;charset=utf-8');
+  }
   function buildSavedCSV(){
     var rows=[['Numéro','Client','Date','Total TVAC','TVA','Statut']];
     var cur=state.quote;
