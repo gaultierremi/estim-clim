@@ -74,7 +74,8 @@
       date:new Date().toISOString().slice(0,10),
       projectType:'clim', incomeCat:'none', annualKwh:0,
       rooms:[ newRoom('Séjour') ],
-      outdoorId:null, extraLines:[], remise:0, signature:null
+      outdoorId:null, extraLines:[], remise:0, signature:null,
+      compare:{ oldAnnual:0, newAnnual:0 }
     };
   }
   function newRoom(name){
@@ -254,6 +255,12 @@
     var months=+state.finance.simMonths||0, rate=+state.finance.simRate||0;
     var simBase=reste, pmt=months>0?computePMT(simBase, rate, months):0;
     return {tvac:t.tvac, htva:t.htva, prime:pr, reste:reste, acompte:acompte, solde:t.tvac-acompte, simMonths:months, simRate:rate, simBase:simBase, pmt:pmt};
+  }
+  // Comparatif « garder l'ancien vs neuf » (estimation, hypothèses éditables par l'utilisateur)
+  function computeCompare(){
+    var c=(state.quote.compare)||{}; var oldA=+c.oldAnnual||0, newA=+c.newAnnual||0;
+    var saving=oldA-newA, fin=computeFinance();
+    return {oldAnnual:oldA, newAnnual:newA, saving:saving, reste:fin.reste, payback:(saving>0?fin.reste/saving:null), has:(oldA>0||newA>0)};
   }
   function computeROI(){
     var q=state.quote, S=state.savings; var kwh=+q.annualKwh||0;
@@ -799,6 +806,26 @@
     p3.appendChild(el('label',{class:'field',style:'margin-top:16px; max-width:220px'},[el('span',null,['Remise (€ HTVA)']), el('div',{class:'input-eur'},[remiseInp])]));
 
     c3.appendChild(p3); left.appendChild(c3);
+
+    // Comparatif garder l'ancien vs neuf
+    var c4=el('div',{class:'card',style:'margin-top:18px'}); var p4=el('div',{class:'pad'});
+    p4.appendChild(el('div',{class:'eyebrow'},['Argumentaire']));
+    p4.appendChild(el('h2',{class:'section-title'},['Comparatif : garder l’ancien vs neuf']));
+    p4.appendChild(el('p',{class:'section-sub'},['Estimation indicative — hypothèses à ajuster avec le client. Le retour se calcule sur le reste à charge estimé.']));
+    var cmp=state.quote.compare = state.quote.compare || {oldAnnual:0,newAnnual:0};
+    var gc=el('div',{class:'grid g2',style:'margin-top:12px'});
+    var resHost=el('div',{style:'margin-top:12px'});
+    function cmpField(label,key){ var i=el('input',{type:'number',min:'0',step:'10'}); i.value=cmp[key]||0; i.addEventListener('input',function(){ cmp[key]=i.value===''?0:+i.value; save(); renderCmpRes(); }); return el('label',{class:'field'},[el('span',null,[label]),el('div',{class:'input-eur'},[i])]); }
+    function renderCmpRes(){ var r=computeCompare(); resHost.innerHTML=''; if(!r.has){ resHost.appendChild(el('p',{class:'section-sub'},['Renseigne les coûts annuels pour estimer l’économie.'])); return; }
+      var box=el('div',{class:'room-result',style:'margin:0'});
+      box.appendChild(el('div',null,[el('div',{class:'total-label'},['Économie estimée / an']), el('div',{class:'kw num'},[euro.format(r.saving)])]));
+      box.appendChild(el('div',{class:'reco'},[r.payback!=null?('Retour sur le reste à charge en ~'+techRound1(r.payback)+' ans'):'Pas d’économie avec ces hypothèses']));
+      resHost.appendChild(box);
+    }
+    gc.appendChild(cmpField('Coût annuel — système actuel','oldAnnual'));
+    gc.appendChild(cmpField('Coût annuel — neuf (estimé)','newAnnual'));
+    p4.appendChild(gc); p4.appendChild(resHost); renderCmpRes();
+    c4.appendChild(p4); left.appendChild(c4);
 
     wrap.appendChild(left);
 
@@ -1976,6 +2003,12 @@
         var roiBox=el('div',{style:'margin-top:14px; background:var(--good-wash); border:1px solid #c7e6d3; border-radius:12px; padding:14px 16px; font-size:13px; color:#23603f'});
         roiBox.innerHTML='💡 <b>Économies estimées</b> : environ '+euro.format(roi.annual)+' / an vs votre énergie actuelle'+(roi.payback?', soit un retour sur le reste à charge en ~'+roi.payback.toFixed(1).replace('.',',')+' ans.':'.')+' <span style="color:var(--muted)">Estimation indicative selon les hypothèses de prix et de SCOP.</span>';
         body.appendChild(roiBox);
+      }
+      var cmp=computeCompare();
+      if(cmp.has && cmp.saving>0){
+        var cmpBox=el('div',{style:'margin-top:14px; background:var(--good-wash); border:1px solid #c7e6d3; border-radius:12px; padding:14px 16px; font-size:13px; color:#23603f'});
+        cmpBox.innerHTML='🔁 <b>Garder l’ancien vs neuf</b> : ~'+euro.format(cmp.saving)+' / an d’économie estimée'+(cmp.payback!=null?', retour sur le reste à charge en ~'+techRound1(cmp.payback)+' ans.':'.')+' <span style="color:var(--muted)">Estimation indicative selon vos hypothèses.</span>';
+        body.appendChild(cmpBox);
       }
     }
     var gal=el('div',{class:'cv-legend'}); var galSeen={};
