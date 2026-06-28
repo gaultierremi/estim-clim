@@ -764,6 +764,19 @@
     p3.appendChild(el('label',{class:'field',style:'margin-top:14px'},[el('span',null,['Groupe extérieur']), outSel]));
     p3.appendChild(el('div',{class:'reco',id:'outHint',style:'margin-top:6px'}));
 
+    // options rapides (upsell)
+    ensureUpsellExtras();
+    p3.appendChild(el('div',{style:'margin-top:16px',class:'total-label'},['Options rapides']));
+    var chips=el('div',{style:'display:flex; gap:8px; flex-wrap:wrap; margin-top:8px'});
+    UPSELL_PRESETS.forEach(function(u){
+      var e=upsellExtraFor(u.key); if(!e) return;
+      var on=state.quote.extraLines.some(function(l){return l.extraId===e.id;});
+      var chip=el('button',{class:'planbtn', 'aria-pressed':on?'true':'false'},[(on?'✓ ':'＋ ')+u.name+(e.price>0?' ('+euro.format(e.price)+')':' (à tarifer)')]);
+      chip.addEventListener('click',function(){ toggleUpsell(u.key); });
+      chips.appendChild(chip);
+    });
+    p3.appendChild(chips);
+
     // extras
     p3.appendChild(el('div',{style:'margin-top:16px',class:'total-label'},['Prestations supplémentaires']));
     var extrasBox=el('div',{id:'extrasBox',style:'margin-top:8px'});
@@ -814,6 +827,25 @@
     {name:'Appartement 2 ch. — 3 splits', rooms:[{name:'Séjour', surface:32},{name:'Chambre 1', surface:14},{name:'Chambre 2', surface:12}]},
     {name:'Maison 3 ch. — 4 splits', rooms:[{name:'Séjour', surface:40},{name:'Chambre 1', surface:14},{name:'Chambre 2', surface:12},{name:'Bureau', surface:10}]}
   ];
+  var UPSELL_PRESETS=[
+    {key:'entretien', name:'Contrat d’entretien annuel'},
+    {key:'thermostat', name:'Thermostat connecté'},
+    {key:'purificateur', name:'Purificateur d’air'},
+    {key:'unite_sup', name:'Unité intérieure supplémentaire'}
+  ];
+  function ensureUpsellExtras(){
+    var changed=false;
+    UPSELL_PRESETS.forEach(function(u){ if(!state.extras.some(function(e){return e.origin==='upsell'&&e.key===u.key;})){ state.extras.push({id:UID(), name:u.name, price:0, origin:'upsell', key:u.key}); changed=true; } });
+    if(changed) save();
+  }
+  function upsellExtraFor(key){ return state.extras.filter(function(e){return e.origin==='upsell'&&e.key===key;})[0]; }
+  function toggleUpsell(key){
+    var e=upsellExtraFor(key); if(!e) return;
+    var line=state.quote.extraLines.filter(function(l){return l.extraId===e.id;})[0];
+    if(line) state.quote.extraLines=state.quote.extraLines.filter(function(l){return l!==line;});
+    else state.quote.extraLines.push({extraId:e.id, qty:1});
+    save(); render();
+  }
   function applyDevisTemplate(tpl){
     var q=state.quote, hasWork=q.client.name || q.rooms.length>1 || (q.rooms[0]&&q.rooms[0].productId) || q.extraLines.length;
     if(hasWork && !confirm('Appliquer le modèle « '+tpl.name+' » ? Le devis courant non enregistré sera remplacé.')) return;
