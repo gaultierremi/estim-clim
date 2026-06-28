@@ -2643,7 +2643,7 @@
     list.forEach(function(x){
       var q=x.q, item=el('div',{class:'saved-item'});
       var dueStr=x.daysLeft<0 ? ('échu depuis '+(-x.daysLeft)+' j') : (x.daysLeft===0?'échoit aujourd’hui':('J-'+x.daysLeft));
-      var meta=el('div',{class:'meta'},[el('b',null,[q.name]), el('span',{style:x.daysLeft<0?'color:var(--danger)':'color:var(--warm)'},[dueStr+' · '+euro.format(q.total)+(q.relance?' · ✓ relancé':'')])]);
+      var meta=el('div',{class:'meta'},[el('b',null,[q.name||q.number||'Devis']), el('span',{style:x.daysLeft<0?'color:var(--danger)':'color:var(--warm)'},[dueStr+' · '+euro.format(q.total)+(q.relance?' · ✓ relancé':'')])]);
       var tg=el('button',{class:'btn subtle sm'},[q.relance?'Annuler relance':'Marquer relancé']);
       tg.addEventListener('click',function(){ q.relance=!q.relance; save(); render(); });
       var open=el('button',{class:'btn subtle sm'},['Ouvrir']); open.addEventListener('click',function(){ state.quote=ensureQuoteTech(JSON.parse(JSON.stringify(q.data))); state.ui.tab='devis'; save(); render(); });
@@ -2652,6 +2652,22 @@
     });
     c.appendChild(p); return c;
   }
+  function downloadText(content, filename, mime){
+    try{ var blob=new Blob([content],{type:mime||'text/plain;charset=utf-8'}); var a=el('a'); a.href=URL.createObjectURL(blob); a.download=filename; document.body.appendChild(a); a.click(); setTimeout(function(){ try{ if(URL.revokeObjectURL) URL.revokeObjectURL(a.href); }catch(e){} a.remove(); },100); }
+    catch(e){ alert('Téléchargement impossible : '+(e&&e.message||e)); }
+  }
+  function csvCell(v){ v=String(v==null?'':v); return /[";\n\r]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; }
+  function buildSavedCSV(){
+    var rows=[['Numéro','Client','Date','Total TVAC','TVA','Statut']];
+    var cur=state.quote;
+    state.savedQuotes.forEach(function(q){
+      var vat='';
+      if(q.data){ try{ state.quote=q.data; vat=Math.round(computeTotals().vat); }catch(e){ vat=''; } finally{ state.quote=cur; } }
+      rows.push([q.number||'', (q.data&&q.data.client&&q.data.client.name)||'', q.date||'', Math.round(+q.total||0), vat, q.status||'brouillon']);
+    });
+    return '﻿'+rows.map(function(r){ return r.map(csvCell).join(';'); }).join('\r\n');
+  }
+  function exportSavedCSV(){ if(!state.savedQuotes.length){ alert('Aucun devis à exporter.'); return; } downloadText(buildSavedCSV(), 'devis-'+new Date().toISOString().slice(0,10)+'.csv', 'text/csv;charset=utf-8'); }
   function printBonCommande(q){
     var cur=state.quote;
     state.quote=ensureQuoteTech(JSON.parse(JSON.stringify(q.data)));
@@ -2681,7 +2697,10 @@
     }
     box.appendChild(buildRelancesCard());
     var c=el('div',{class:'card',style:'margin-top:20px'}); var p=el('div',{class:'pad'});
-    p.appendChild(el('h2',{class:'section-title',style:'font-size:15px; margin-bottom:6px'},['Devis enregistrés']));
+    var dh=el('div',{style:'display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap'});
+    dh.appendChild(el('h2',{class:'section-title',style:'font-size:15px; margin-bottom:6px'},['Devis enregistrés']));
+    if(state.savedQuotes.length){ var csvB=el('button',{class:'btn subtle sm'},['⤓ Export CSV (compta)']); csvB.addEventListener('click', exportSavedCSV); dh.appendChild(csvB); }
+    p.appendChild(dh);
     if(state.savedQuotes.length===0) p.appendChild(el('p',{class:'section-sub'},['Aucun devis mémorisé. Enregistre un devis depuis l\u2019onglet Devis pour le suivre ici.']));
     state.savedQuotes.forEach(function(q){
       var item=el('div',{class:'saved-item'});
