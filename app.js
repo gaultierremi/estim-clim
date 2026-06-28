@@ -1581,6 +1581,11 @@
     g4.appendChild(techNum('Amenée élec (m)',tech,'elecAmeneeLen','0.5'));
     body.appendChild(g4);
     body.appendChild(el('div',{class:'section-sub',style:'font-size:12px'},[ prod&&prod.disjoncteur ? ('Disjoncteur conseillé (modèle) : '+prod.disjoncteur+' — à confirmer par l’électricien.') : 'Disjoncteur : à confirmer par l’électricien (non renseigné au catalogue).' ]));
+    var elevRow=el('div',{style:'margin-top:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap'});
+    var elevBtn=el('button',{class:'btn subtle sm'},['📐 Élévation du mur']); elevBtn.addEventListener('click',function(){ openElevationEditor(r); });
+    elevRow.appendChild(elevBtn);
+    if(tech.elevation) elevRow.appendChild(el('span',{class:'section-sub',style:'font-size:12px'},['h sous unité '+techRound1(tech.elevation.hauteurSousUnite)+' m · trou '+techRound1(tech.elevation.hauteurTrou)+' m · goulotte '+techRound1(tech.elevation.goulotteLenElev)+' m']));
+    body.appendChild(elevRow);
     card.appendChild(body);
     return card;
   }
@@ -1646,6 +1651,98 @@
     addB.addEventListener('click', addTechSuppliesToQuote);
     t.appendChild(addB);
     return t;
+  }
+
+  /* ---- Éditeur d'élévation de mur (par unité) ---- */
+  function defaultElevation(){ return { wallW:4, wallH:2.6, unitW:0.9, unitH:0.29, unitX:0.4, unitY:0.3, holeX:1.6, holeY:0.45, holeD:60, goulottePath:[], hauteurSousUnite:0, hauteurTrou:0, goulotteLenElev:0 }; }
+  function recomputeElevation(e){
+    e.hauteurSousUnite=Math.max(0, e.wallH-(e.unitY+e.unitH));
+    e.hauteurTrou=Math.max(0, e.wallH-e.holeY);
+    var ux=e.unitX+e.unitW/2, uy=e.unitY+e.unitH;      // point de raccordement = bas-centre de l'unité
+    e.goulottePath=[ {x:ux,y:uy}, {x:ux,y:e.holeY}, {x:e.holeX,y:e.holeY} ]; // chemin orthogonal (vertical puis horizontal)
+    e.goulotteLenElev=Math.abs(e.holeY-uy)+Math.abs(e.holeX-ux);
+    return e;
+  }
+  function clampElev(e){
+    e.unitW=Math.min(e.unitW,e.wallW); e.unitH=Math.min(e.unitH,e.wallH);
+    e.unitX=clamp(e.unitX,0,e.wallW-e.unitW); e.unitY=clamp(e.unitY,0,e.wallH-e.unitH);
+    e.holeX=clamp(e.holeX,0,e.wallW); e.holeY=clamp(e.holeY,0,e.wallH);
+  }
+  function openElevationEditor(room){
+    ensureRoomTech(room);
+    if(!room.tech.elevation) room.tech.elevation=defaultElevation();
+    var e=room.tech.elevation, d=defaultElevation(); for(var k in d){ if(e[k]==null) e[k]=d[k]; }
+    clampElev(e); recomputeElevation(e);
+    var SCALE=110, M=42;
+    var back=el('div',{class:'share-modal', id:'elevModal'});
+    var panel=el('div',{class:'share-panel',style:'max-width:600px'});
+    panel.appendChild(el('div',{class:'eyebrow'},['Élévation']));
+    panel.appendChild(el('h2',{class:'section-title',style:'margin:2px 0 8px'},['Élévation de mur — '+(room.name||'Pièce')]));
+    var dims=el('div',{class:'grid g2',style:'gap:10px;margin-bottom:10px'});
+    dims.appendChild(numField('Largeur mur (m)', e.wallW, '0.1', function(v){ e.wallW=Math.max(1,+v||4); clampElev(e); rebuild(); save(); }));
+    dims.appendChild(numField('Hauteur mur (m)', e.wallH, '0.1', function(v){ e.wallH=Math.max(1,+v||2.6); clampElev(e); rebuild(); save(); }));
+    panel.appendChild(dims);
+    var svgHost=el('div'); panel.appendChild(svgHost);
+    var readout=el('div',{style:'margin-top:8px;font-size:13px;line-height:1.7'}); panel.appendChild(readout);
+    panel.appendChild(drillWarning());
+    var row=el('div',{class:'share-actions'});
+    row.appendChild(numField('Ø trou (mm)', e.holeD, '1', function(v){ e.holeD=Math.max(1,Math.round(+v||60)); rebuild(); save(); }));
+    var closeB=el('button',{class:'btn primary'},['Fermer']);
+    function done(){ recomputeElevation(e); save(); var m=document.getElementById('elevModal'); if(m&&m.parentNode)m.parentNode.removeChild(m); if(state.ui.tab==='technique') render(); }
+    closeB.addEventListener('click', done);
+    row.appendChild(closeB); panel.appendChild(row);
+    back.appendChild(panel);
+    back.addEventListener('click',function(ev){ if(ev.target===back) done(); });
+    document.body.appendChild(back);
+
+    function refreshReadouts(){
+      readout.innerHTML='';
+      readout.appendChild(el('div',{html:'Hauteur sous unité (sol → bas de l’unité) : <b>'+techRound1(e.hauteurSousUnite)+' m</b>'}));
+      readout.appendChild(el('div',{html:'Hauteur du trou (sol → centre) : <b>'+techRound1(e.hauteurTrou)+' m</b>'}));
+      readout.appendChild(el('div',{html:'Longueur de goulotte (élévation) : <b>'+techRound1(e.goulotteLenElev)+' m</b>'}));
+    }
+    function rebuild(){ recomputeElevation(e); svgHost.innerHTML=''; svgHost.appendChild(buildElevSVG()); refreshReadouts(); }
+    function buildElevSVG(){
+      var Wpx=e.wallW*SCALE, Hpx=e.wallH*SCALE, vbW=Wpx+M*2, vbH=Hpx+M*1.8;
+      var svg=svgN('svg',{viewBox:'0 0 '+vbW+' '+vbH, width:'100%', style:'display:block;background:#fbfdfd;border:1px solid #dce5e8;border-radius:10px;touch-action:none;max-height:56vh'});
+      function MX(m){ return M+m*SCALE; } function MY(m){ return M+m*SCALE; }
+      svg.appendChild(svgN('rect',{x:M,y:M,width:Wpx,height:Hpx,fill:'#ffffff',stroke:'#9fb6bd','stroke-width':2}));
+      svg.appendChild(svgN('line',{x1:M-8,y1:M+Hpx,x2:M+Wpx+8,y2:M+Hpx,stroke:'#5e727c','stroke-width':3}));
+      var fl=svgN('text',{x:M+Wpx+10,y:M+Hpx+4,'font-size':12,fill:'#5e727c'}); fl.textContent='sol'; svg.appendChild(fl);
+      svg.appendChild(svgN('line',{x1:M-20,y1:M,x2:M-20,y2:M+Hpx,stroke:'#b9c6cc','stroke-width':1}));
+      var hc=svgN('text',{x:(M-24),y:(M+Hpx/2),'font-size':11,fill:'#8499a1','text-anchor':'middle',transform:'rotate(-90 '+(M-24)+' '+(M+Hpx/2)+')'}); hc.textContent=techRound1(e.wallH)+' m'; svg.appendChild(hc);
+      var goul=svgN('polyline',{fill:'none',stroke:'#c9760f','stroke-width':4,'stroke-dasharray':'8 6','stroke-linejoin':'round','stroke-linecap':'round'}); svg.appendChild(goul);
+      var sousLine=svgN('line',{stroke:'#0e9aa8','stroke-width':1,'stroke-dasharray':'3 3'}); svg.appendChild(sousLine);
+      var sousLbl=svgN('text',{'font-size':11,fill:'#0b6e78','font-weight':700}); svg.appendChild(sousLbl);
+      var unit=svgN('rect',{rx:4,fill:'#e6f5f6',stroke:'#0e9aa8','stroke-width':2,style:'cursor:move'}); svg.appendChild(unit);
+      var unitLbl=svgN('text',{'font-size':11,fill:'#0b6e78','font-weight':700,'text-anchor':'middle','pointer-events':'none'}); unitLbl.textContent='Unité'; svg.appendChild(unitLbl);
+      var hole=svgN('circle',{fill:'rgba(191,70,49,.2)',stroke:'#bf4631','stroke-width':2,style:'cursor:move'}); svg.appendChild(hole);
+      var holeLbl=svgN('text',{'font-size':11,fill:'#bf4631','font-weight':700,'pointer-events':'none'}); svg.appendChild(holeLbl);
+      function apply(){
+        recomputeElevation(e);
+        unit.setAttribute('x',MX(e.unitX)); unit.setAttribute('y',MY(e.unitY)); unit.setAttribute('width',e.unitW*SCALE); unit.setAttribute('height',e.unitH*SCALE);
+        unitLbl.setAttribute('x',MX(e.unitX+e.unitW/2)); unitLbl.setAttribute('y',MY(e.unitY+e.unitH/2)+4);
+        var hr=Math.max(8,(e.holeD/1000)*SCALE/2);
+        hole.setAttribute('cx',MX(e.holeX)); hole.setAttribute('cy',MY(e.holeY)); hole.setAttribute('r',hr);
+        holeLbl.setAttribute('x',MX(e.holeX)+hr+3); holeLbl.setAttribute('y',MY(e.holeY)+4); holeLbl.textContent='Ø'+e.holeD;
+        goul.setAttribute('points', e.goulottePath.map(function(pt){return MX(pt.x)+','+MY(pt.y);}).join(' '));
+        var bx=MX(e.unitX+e.unitW)+10; sousLine.setAttribute('x1',bx); sousLine.setAttribute('y1',MY(e.unitY+e.unitH)); sousLine.setAttribute('x2',bx); sousLine.setAttribute('y2',MY(e.wallH));
+        sousLbl.setAttribute('x',bx+3); sousLbl.setAttribute('y',(MY(e.unitY+e.unitH)+MY(e.wallH))/2); sousLbl.textContent=techRound1(e.hauteurSousUnite)+' m';
+        refreshReadouts();
+      }
+      function drag(node,get,set){
+        node.addEventListener('pointerdown',function(ev){ ev.stopPropagation(); var start=svgPoint(svg,ev); var o=get(); try{node.setPointerCapture(ev.pointerId);}catch(_){}
+          function mv(e2){ var pp=svgPoint(svg,e2); set(o.x+(pp.x-start.x)/SCALE, o.y+(pp.y-start.y)/SCALE); apply(); }
+          function up(e2){ try{node.releasePointerCapture(ev.pointerId);}catch(_){} node.removeEventListener('pointermove',mv); node.removeEventListener('pointerup',up); save(); }
+          node.addEventListener('pointermove',mv); node.addEventListener('pointerup',up);
+        });
+      }
+      drag(unit, function(){return {x:e.unitX,y:e.unitY};}, function(x,y){ e.unitX=clamp(x,0,e.wallW-e.unitW); e.unitY=clamp(y,0,e.wallH-e.unitH); });
+      drag(hole, function(){return {x:e.holeX,y:e.holeY};}, function(x,y){ e.holeX=clamp(x,0,e.wallW); e.holeY=clamp(y,0,e.wallH); });
+      apply();
+      return svg;
+    }
+    rebuild();
   }
   function renderTechnique(){
     var box=el('div');
