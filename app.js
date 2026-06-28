@@ -307,6 +307,8 @@
     var foot=el('div',{class:'home-foot'});
     var cfg=el('button',{class:'btn subtle sm'},['⚙ Réglages']); cfg.addEventListener('click',function(){ state.ui.tab='admin'; render(); });
     foot.appendChild(cfg);
+    var help=el('button',{class:'btn subtle sm',style:'margin-left:8px'},['❓ Outils & aide (primes/TVA)']); help.addEventListener('click',function(){ state.ui.tab='admin'; state.ui.adminSection='outils'; render(); });
+    foot.appendChild(help);
     box.appendChild(foot);
     return box;
   }
@@ -1075,6 +1077,22 @@
     g2.appendChild(out);
     p.appendChild(g2); calc();
     c.appendChild(p); box.appendChild(c);
+
+    // Mémo primes / TVA (indicatif)
+    var mc=el('div',{class:'card',style:'margin-top:16px'}); var mp=el('div',{class:'pad'});
+    mp.appendChild(el('div',{class:'eyebrow'},['Aide terrain']));
+    mp.appendChild(el('h2',{class:'section-title'},['Mémo primes & TVA — Wallonie']));
+    mp.appendChild(el('div',{class:'banner warn',style:'margin:10px 0',html:'<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1l7 13H1L8 1z" stroke="#b6810f" stroke-width="1.4" stroke-linejoin="round"/></svg><div><b>Indicatif</b> — à confirmer au cas par cas sur logement.wallonie.be. Montants et conditions évoluent.</div>'}));
+    var ul=el('div',{style:'font-size:13.5px; line-height:1.7'});
+    ul.innerHTML=
+      '<div>• <b>Climatisation réversible (PAC air-air)</b> : <b>aucune prime</b> wallonne. Ne pas la promettre.</div>'+
+      '<div>• <b>TVA 6 %</b> sur fourniture + pose des PAC (y compris réversibles), tous logements, depuis le 01/01/2026.</div>'+
+      '<div>• Client qui veut une prime → orienter vers une <b>PAC air-eau</b> (audit logement obligatoire, logement &gt; 15 ans).</div>'+
+      '<div>• <b>Changement de régime des primes au 01/10/2026</b> (Rénopack / logique de saut de label) — vérifier la version en vigueur.</div>';
+    mp.appendChild(ul);
+    var lk=el('a',{href:'https://logement.wallonie.be',target:'_blank',rel:'noopener',class:'btn subtle sm',style:'margin-top:12px'},['🔗 logement.wallonie.be']);
+    mp.appendChild(lk);
+    mc.appendChild(mp); box.appendChild(mc);
     return box;
   }
   function adminMessages(){
