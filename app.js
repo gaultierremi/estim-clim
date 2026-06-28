@@ -3,6 +3,13 @@
   var euro = new Intl.NumberFormat('fr-BE',{style:'currency',currency:'EUR',maximumFractionDigits:0});
   var euro2 = new Intl.NumberFormat('fr-BE',{style:'currency',currency:'EUR',minimumFractionDigits:2,maximumFractionDigits:2});
   var STORAGE_KEY = 'estimclim_pro_v1';
+  var DEMO_KEY = 'estimclim_demo_v1';
+  var MODE_KEY = 'estimclim_mode';   // méta-flag HORS des deux stores → le mode survit au rechargement
+  function getMode(){ try{ return localStorage.getItem(MODE_KEY)==='demo' ? 'demo' : 'real'; }catch(e){ return 'real'; } }
+  function setMode(m){ try{ localStorage.setItem(MODE_KEY, m==='demo'?'demo':'real'); }catch(e){} }
+  function isDemo(){ return getMode()==='demo'; }
+  function activeKey(){ return isDemo() ? DEMO_KEY : STORAGE_KEY; }
+  function syncEnabled(){ return !isDemo(); } // §0.2 : toute synchro cloud reste coupée en démo
   var UID = function(){ return Math.random().toString(36).slice(2,9); };
 
   /* ---------------- default / seed state ---------------- */
@@ -149,10 +156,10 @@
   var state;
   function load(){
     try{
-      var raw = localStorage.getItem(STORAGE_KEY);
+      var raw = localStorage.getItem(activeKey());
       if(raw){ var s = JSON.parse(raw); state = mergeDefaults(s); storageOK = true; return; }
     }catch(e){ storageOK = false; }
-    state = seed();
+    state = isDemo() ? mergeDefaults(demoSeed()) : seed();
     if(storageOK===undefined) storageOK=true;
   }
   var storageOK;
@@ -178,6 +185,22 @@
     if(s.tourMsg) d.tourMsg = Object.assign(newTourMsg(), s.tourMsg);
     return d;
   }
+  // Jeu de démo minimal (étendu en Partie B). Société manifestement fictive.
+  function demoSeed(){
+    var d=seed();
+    d.company={ name:'DÉMO Climatisation', addr:'Rue de la Démo 1, 4000 Liège', phone:'04 000 00 00', email:'demo@exemple.be', vatNr:'BE 0000.000.000 — DÉMO', logo:null, validity:30, quotePrefix:'DEMO-2026-', footer:d.company.footer };
+    return d;
+  }
+  function refreshDemoUI(){ try{ document.body.classList.toggle('demo-mode', isDemo()); }catch(e){} }
+  function reloadActive(){
+    load();
+    state.ui = Object.assign({tab:'home',adminSection:'societe',clientPrices:true,clientView:false,planSel:null,shared:false}, {});
+    state.quote.rooms.forEach(function(r){ if(!r.productId) autoSelectProduct(r); });
+    refreshDemoUI(); render();
+  }
+  function enterDemo(){ if(isDemo()){ state.ui.tab='home'; render(); return; } setMode('demo'); try{ if(!localStorage.getItem(DEMO_KEY)) localStorage.setItem(DEMO_KEY, JSON.stringify(demoSeed())); }catch(e){} reloadActive(); }
+  function exitDemo(){ if(!isDemo()) return; setMode('real'); reloadActive(); }
+  function resetDemo(){ if(!confirm('Réinitialiser le jeu de démo à son état d’origine ? (tes vraies données ne sont pas touchées)')) return; try{ localStorage.setItem(DEMO_KEY, JSON.stringify(demoSeed())); }catch(e){} if(isDemo()) reloadActive(); else alert('Jeu de démo réinitialisé.'); }
   var saveTimer;
   function save(){
     setSaveState(true,'Enregistrement…');
@@ -185,7 +208,7 @@
     saveTimer = setTimeout(function(){
       try{
         var copy = Object.assign({}, state); delete copy.ui;
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(copy));
+        localStorage.setItem(activeKey(), JSON.stringify(copy));
         setSaveState(true,'Enregistré');
       }catch(e){ setSaveState(false,'Session uniquement'); }
     }, 250);
@@ -356,6 +379,8 @@
     foot.appendChild(cfg);
     var help=el('button',{class:'btn subtle sm',style:'margin-left:8px'},['❓ Outils & aide (primes/TVA)']); help.addEventListener('click',function(){ state.ui.tab='admin'; state.ui.adminSection='outils'; render(); });
     foot.appendChild(help);
+    var demoBtn=el('button',{class:'btn subtle sm',style:'margin-left:8px'},[isDemo()?'🎬 Quitter le mode démo':'🎬 Activer le mode démo']); demoBtn.addEventListener('click',function(){ isDemo()?exitDemo():enterDemo(); });
+    foot.appendChild(demoBtn);
     box.appendChild(foot);
     return box;
   }
@@ -1284,6 +1309,21 @@
     var lk=el('a',{href:'https://logement.wallonie.be',target:'_blank',rel:'noopener',class:'btn subtle sm',style:'margin-top:12px'},['🔗 logement.wallonie.be']);
     mp.appendChild(lk);
     mc.appendChild(mp); box.appendChild(mc);
+
+    // Mode démo
+    var dc=el('div',{class:'card',style:'margin-top:16px'}); var dp=el('div',{class:'pad'});
+    dp.appendChild(el('div',{class:'eyebrow'},['Démonstration']));
+    dp.appendChild(el('h2',{class:'section-title'},['Mode démo']));
+    dp.appendChild(el('p',{class:'section-sub'},[isDemo()?'Tu es en MODE DÉMO : données fictives, stockées à part. Tes vraies données sont intactes et seront retrouvées en quittant.':'Charge un jeu de données fictif pour tout démontrer (devis, plan, 3D, AR, technique, tournée) sans toucher à tes vraies données. Stockage séparé, sorties marquées « DÉMO ».']));
+    var drow=el('div',{style:'display:flex;gap:8px;flex-wrap:wrap;margin-top:10px'});
+    if(isDemo()){
+      var ex=el('button',{class:'btn primary sm'},['↩ Quitter le mode démo']); ex.addEventListener('click', exitDemo); drow.appendChild(ex);
+      var rs=el('button',{class:'btn subtle sm'},['↺ Réinitialiser la démo']); rs.addEventListener('click', resetDemo); drow.appendChild(rs);
+    } else {
+      var en=el('button',{class:'btn primary sm'},['🎬 Activer le mode démo']); en.addEventListener('click', enterDemo); drow.appendChild(en);
+    }
+    dp.appendChild(drow);
+    dc.appendChild(dp); box.appendChild(dc);
     return box;
   }
   function adminMessages(){
@@ -3355,6 +3395,7 @@
   /* ---------------- init ---------------- */
   load();
   state.ui = Object.assign({tab:'home',adminSection:'societe',clientPrices:true,clientView:false,planSel:null,shared:false}, state.ui||{});
+  refreshDemoUI();
   if(!tryRenderShared()){
     state.quote.rooms.forEach(function(r){ if(!r.productId) autoSelectProduct(r); });
     render();
