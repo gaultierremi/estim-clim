@@ -31,7 +31,7 @@
         {id:UID(), brand:'Daikin', model:'Multi 4 sorties', kw:8.0, ports:4, price:2600},
         {id:UID(), brand:'Daikin', model:'Multi 5 sorties', kw:10.0, ports:5, price:3100}
       ],
-      labour:{ pose:{mural:600, console:700, cassette:900, gainable:1200}, miseEnService:150, liaisonPerM:45, liaisonDefaultM:5, diversPct:8 },
+      labour:{ pose:{mural:600, console:700, cassette:900, gainable:1200}, miseEnService:150, liaisonPerM:45, liaisonDefaultM:5, diversPct:8, techPrices:newTechPrices() },
       extras:[
         {id:UID(), name:'Dépose ancien appareil', price:150},
         {id:UID(), name:'Pompe de relevage des condensats', price:220},
@@ -79,6 +79,9 @@
     return r.tech;
   }
   function ensureQuoteTech(q){ if(q && Array.isArray(q.rooms)) q.rooms.forEach(ensureRoomTech); return q; }
+  // Tarifs des fournitures techniques (€). Livrés à 0 (aucune valeur en dur) ; éditables en Réglages.
+  function newTechPrices(){ return { goulotteM:0, carottage:0, pompe:0, evacM:0, support:0, elecM:0 }; }
+  function ensureTechPrices(){ if(!state.labour.techPrices) state.labour.techPrices={}; var d=newTechPrices(); for(var k in d){ if(state.labour.techPrices[k]==null) state.labour.techPrices[k]=d[k]; } return state.labour.techPrices; }
   function newPlan(){ return { wcm:1000, hcm:700, grid:50, snap:25, rooms:[], items:[], tech:newPlanTech() }; }
   function newPlanTech(){ return { goulottes:[], trous:[] }; }
   function ensurePlanTech(p){ if(p && (!p.tech || typeof p.tech!=='object')) p.tech=newPlanTech(); else if(p && p.tech){ if(!Array.isArray(p.tech.goulottes)) p.tech.goulottes=[]; if(!Array.isArray(p.tech.trous)) p.tech.trous=[]; } return p; }
@@ -111,7 +114,7 @@
     d.company = Object.assign(d.company, s.company||{});
     if(Array.isArray(s.catalog)) d.catalog = s.catalog;
     if(Array.isArray(s.outdoors)) d.outdoors = s.outdoors;
-    if(s.labour){ d.labour = Object.assign(d.labour, s.labour); if(s.labour.pose) d.labour.pose = Object.assign(d.labour.pose, s.labour.pose); }
+    if(s.labour){ d.labour = Object.assign(d.labour, s.labour); if(s.labour.pose) d.labour.pose = Object.assign(d.labour.pose, s.labour.pose); d.labour.techPrices = Object.assign(newTechPrices(), s.labour.techPrices||{}); }
     if(Array.isArray(s.extras)) d.extras = s.extras;
     if(s.settings) d.settings = Object.assign(d.settings, s.settings);
     if(s.quote) d.quote = Object.assign(newQuote(), s.quote);
@@ -182,7 +185,10 @@
     if(n>0) pose += (+L.miseEnService||0);
     var ao=activeOutdoor(); var outdoor = ao.unit?(+ao.unit.price||0):0;
     var extras=0;
-    q.extraLines.forEach(function(line){ var e=state.extras.filter(function(x){return x.id===line.extraId;})[0]; if(e) extras += (+e.price||0)*(+line.qty||0); });
+    q.extraLines.forEach(function(line){
+      if(line.origin==='tech'){ extras += (+line.unitPrice||0)*(+line.qty||0); return; }
+      var e=state.extras.filter(function(x){return x.id===line.extraId;})[0]; if(e) extras += (+e.price||0)*(+line.qty||0);
+    });
     var subtotal = indoor+outdoor+pose+liaison+extras;
     var divers = subtotal*((+L.diversPct||0)/100);
     var htvaBrut = subtotal+divers;
@@ -453,6 +459,15 @@
     box.innerHTML='';
     if(state.quote.extraLines.length===0){ box.appendChild(el('div',{class:'reco',style:'color:var(--muted-2)'},['Aucune prestation ajoutée.'])); return; }
     state.quote.extraLines.forEach(function(line){
+      if(line.origin==='tech'){
+        var trow=el('div',{class:'saved-item',style:'margin-top:8px'});
+        var untar=(+line.unitPrice||0)===0;
+        var tmeta=el('div',{class:'meta'},[ el('b',null,[line.label]), el('span',null,[techRound1(line.qty)+' '+(line.unit||'')+' × '+euro.format(line.unitPrice||0)+(untar?'  · non tarifé':'')]) ]);
+        var ttag=el('span',{class:'badge-confirm'},['Technique']);
+        var trm=el('button',{class:'icon-btn','aria-label':'Retirer'},[]); trm.innerHTML='✕';
+        trm.addEventListener('click',function(){ state.quote.extraLines=state.quote.extraLines.filter(function(l){return l!==line;}); rebuildExtras(box); refreshDevis(); save(); });
+        trow.appendChild(tmeta); trow.appendChild(ttag); trow.appendChild(trm); box.appendChild(trow); return;
+      }
       var e=state.extras.filter(function(x){return x.id===line.extraId;})[0]; if(!e) return;
       var row=el('div',{class:'saved-item',style:'margin-top:8px'});
       var meta=el('div',{class:'meta'},[el('b',null,[e.name]), el('span',null,[euro.format(e.price)+' / unité'])]);
@@ -745,6 +760,17 @@
     g.appendChild(numField('Mètres de liaison par défaut / unité', state.labour.liaisonDefaultM,'1', function(v){state.labour.liaisonDefaultM=v; save();}));
     g.appendChild(numField('Divers (%) — condensats, élec., supports', state.labour.diversPct,'1', function(v){state.labour.diversPct=v; save();}));
     p.appendChild(g);
+    var tp=ensureTechPrices();
+    p.appendChild(el('h2',{class:'section-title',style:'font-size:14px;margin-top:18px'},['Fournitures techniques (relevé de pose)']));
+    p.appendChild(el('p',{class:'section-sub'},['Tarifs unitaires utilisés par « Ajouter les fournitures au devis » (onglet Technique). Livrés vides — renseigne tes prix.']));
+    var gt=el('div',{class:'grid g2',style:'margin-top:12px'});
+    gt.appendChild(eurField('Goulotte — par mètre', tp.goulotteM, function(v){tp.goulotteM=v; save();}));
+    gt.appendChild(eurField('Carottage — par trou', tp.carottage, function(v){tp.carottage=v; save();}));
+    gt.appendChild(eurField('Pompe de relevage — pièce', tp.pompe, function(v){tp.pompe=v; save();}));
+    gt.appendChild(eurField('Évacuation condensats — par mètre', tp.evacM, function(v){tp.evacM=v; save();}));
+    gt.appendChild(eurField('Support / fixation — pièce', tp.support, function(v){tp.support=v; save();}));
+    gt.appendChild(eurField('Amenée électrique — par mètre', tp.elecM, function(v){tp.elecM=v; save();}));
+    p.appendChild(gt);
     c.appendChild(p); return c;
   }
 
@@ -901,7 +927,10 @@
       return '<tr><td>'+escapeHtml(r.name)+'</td><td>'+escapeHtml(label)+'</td><td class="r">'+(+r.surface||0)+' m²</td><td class="r">'+c.kW.toFixed(1).replace('.',',')+' kW</td><td class="r">'+price+'</td></tr>';
     }).join('');
 
-    var extraRows=q.extraLines.map(function(line){ var e=state.extras.filter(function(x){return x.id===line.extraId;})[0]; if(!e)return''; return '<tr><td colspan="3">'+escapeHtml(e.name)+'</td><td class="r">×'+(+line.qty||0)+'</td><td class="r">'+euro2.format((+e.price||0)*(+line.qty||0))+'</td></tr>'; }).join('');
+    var extraRows=q.extraLines.map(function(line){
+      if(line.origin==='tech'){ return '<tr><td colspan="3">'+escapeHtml(line.label)+'</td><td class="r">'+techRound1(line.qty)+' '+escapeHtml(line.unit||'')+'</td><td class="r">'+euro2.format((+line.unitPrice||0)*(+line.qty||0))+'</td></tr>'; }
+      var e=state.extras.filter(function(x){return x.id===line.extraId;})[0]; if(!e)return''; return '<tr><td colspan="3">'+escapeHtml(e.name)+'</td><td class="r">×'+(+line.qty||0)+'</td><td class="r">'+euro2.format((+e.price||0)*(+line.qty||0))+'</td></tr>';
+    }).join('');
     var od=t.outdoorUnit? '<tr><td colspan="2">Groupe extérieur — '+escapeHtml(t.outdoorUnit.brand+' '+t.outdoorUnit.model)+'</td><td class="r">'+fmtKw(t.outdoorUnit.kw)+'</td><td class="r">'+t.outdoorUnit.ports+' sorties</td><td class="r">'+euro2.format(t.outdoorUnit.price)+'</td></tr>':'';
 
     var logoHtml = co.logo? '<img src="'+co.logo+'" alt="logo">':'';
@@ -1388,7 +1417,9 @@
       if(maxL!=null && L>maxL) alerts.push({room:r.name,msg:'liaison '+techRound1(L)+' m dépasse la longueur max du modèle ('+techRound1(maxL)+' m)'});
       if(maxD!=null && (+tech.deniv||0)>maxD) alerts.push({room:r.name,msg:'dénivelé '+techRound1(tech.deniv)+' m dépasse le dénivelé max du modèle ('+techRound1(maxD)+' m)'});
     });
-    return {liaisonByPair:liaisonByPair, goulotteBySection:goulotteBySection, trousByDiam:trousByDiam, pompes:pompes, evacTotal:evacTotal, elecTotal:elecTotal, liaisonTotal:liaisonTotal, goulotteTotal:goulotteTotal, chargeRows:chargeRows, chargeTotal:chargeTotal, chargeUnknown:chargeUnknown, alerts:alerts};
+    var trousTotal=0; for(var k in trousByDiam) trousTotal+=trousByDiam[k];
+    var supportCount=rooms.length;
+    return {liaisonByPair:liaisonByPair, goulotteBySection:goulotteBySection, trousByDiam:trousByDiam, trousTotal:trousTotal, supportCount:supportCount, pompes:pompes, evacTotal:evacTotal, elecTotal:elecTotal, liaisonTotal:liaisonTotal, goulotteTotal:goulotteTotal, chargeRows:chargeRows, chargeTotal:chargeTotal, chargeUnknown:chargeUnknown, alerts:alerts};
   }
 
   var techSynthHost=null;
@@ -1451,7 +1482,7 @@
     p.appendChild(synthSection('Liaisons frigorifiques', mapToLines(s.liaisonByPair, ' m')));
     p.appendChild(synthSection('Goulottes', mapToLines(s.goulotteBySection, ' m')));
     p.appendChild(synthSection('Trous de carottage', Object.keys(s.trousByDiam).map(function(d){ return 'Ø '+d+' mm : '+s.trousByDiam[d]; })));
-    p.appendChild(synthSection('Divers', ['Pompes de relevage : '+s.pompes, 'Évacuation condensats : '+techRound1(s.evacTotal)+' m', 'Amenée électrique : '+techRound1(s.elecTotal)+' m']));
+    p.appendChild(synthSection('Divers', ['Pompes de relevage : '+s.pompes, 'Supports / fixations : '+s.supportCount, 'Évacuation condensats : '+techRound1(s.evacTotal)+' m', 'Amenée électrique : '+techRound1(s.elecTotal)+' m']));
     var chargeLines=s.chargeRows.map(function(cr){ return cr.room+' : '+(cr.grams==null?'à confirmer':Math.round(cr.grams)+' g'); });
     var chSec=synthSection('Charge add. de réfrigérant (estimation)', chargeLines);
     chSec.appendChild(el('div',{style:'font-size:12px;font-weight:700;margin-top:4px'},['Total estimé : '+Math.round(s.chargeTotal)+' g'+(s.chargeUnknown?' (+ à confirmer)':'')]));
@@ -1461,7 +1492,41 @@
     c.appendChild(p); return c;
   }
 
-  function techToolbar(){ return el('div',{class:'plan-toolbar', id:'techToolbar'}); }
+  // Fournitures techniques dérivées de la synthèse. Prix depuis state.labour.techPrices (Réglages).
+  var TECH_SUPPLY_DEFS=[
+    {key:'goulotte', label:'Goulotte', unit:'m', priceKey:'goulotteM', qty:function(s){return s.goulotteTotal;}},
+    {key:'carottage', label:'Carottage / trou', unit:'u', priceKey:'carottage', qty:function(s){return s.trousTotal;}},
+    {key:'pompe', label:'Pompe de relevage des condensats', unit:'u', priceKey:'pompe', qty:function(s){return s.pompes;}},
+    {key:'evac', label:'Évacuation condensats', unit:'m', priceKey:'evacM', qty:function(s){return s.evacTotal;}},
+    {key:'support', label:'Support / fixation', unit:'u', priceKey:'support', qty:function(s){return s.supportCount;}},
+    {key:'elec', label:'Amenée électrique', unit:'m', priceKey:'elecM', qty:function(s){return s.elecTotal;}}
+  ];
+  // Idempotent : repère les lignes par origin:'tech'+key, met à jour qty/prix au lieu de dupliquer.
+  function addTechSuppliesToQuote(){
+    var s=computeTechSynthesis(); var tp=ensureTechPrices();
+    // Liaisons : on synchronise la longueur relevée dans le mécanisme de liaison existant (pas de doublon).
+    state.quote.rooms.forEach(function(r){ var L=+r.tech.liaisonLen||0; if(L>0) r.liaisonM=L; });
+    var added=0, untar=false;
+    TECH_SUPPLY_DEFS.forEach(function(def){
+      var qty=Math.round(def.qty(s)*100)/100, unitPrice=+tp[def.priceKey]||0;
+      var existing=state.quote.extraLines.filter(function(l){ return l.origin==='tech' && l.key===def.key; })[0];
+      var label=def.label+(def.unit==='m'?' (m)':'');
+      if(qty>0){
+        if(existing){ existing.qty=qty; existing.unitPrice=unitPrice; existing.label=label; existing.unit=def.unit; }
+        else state.quote.extraLines.push({origin:'tech', key:def.key, label:label, unit:def.unit, qty:qty, unitPrice:unitPrice});
+        added++; if(unitPrice===0) untar=true;
+      } else if(existing){ state.quote.extraLines=state.quote.extraLines.filter(function(l){ return l!==existing; }); }
+    });
+    save(); render();
+    alert(added+' fourniture(s) technique(s) ajoutée(s)/mise(s) à jour dans le devis, et liaisons synchronisées avec le relevé.'+(untar?'\n\nCertaines ne sont pas tarifées (prix 0) — renseigne les tarifs dans Réglages → Main-d’œuvre.':''));
+  }
+  function techToolbar(){
+    var t=el('div',{class:'plan-toolbar', id:'techToolbar'});
+    var addB=el('button',{class:'btn primary sm'},['＋ Ajouter les fournitures au devis']);
+    addB.addEventListener('click', addTechSuppliesToQuote);
+    t.appendChild(addB);
+    return t;
+  }
   function renderTechnique(){
     var box=el('div');
     box.appendChild(el('div',{class:'eyebrow'},['Pose']));
