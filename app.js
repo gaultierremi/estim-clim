@@ -448,7 +448,10 @@
     if(typeof L==='undefined'){ container.innerHTML='<div class="banner warn" style="margin:0"><div>Carte indisponible : la librairie Leaflet n’a pas pu être chargée (connexion requise). Le géocodage et le planning restent utilisables hors carte.</div></div>'; return; }
     var T=state.tour;
     var map=L.map(container).setView([50.64,4.67], 8); // Belgique
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19, attribution:'© OpenStreetMap'}).addTo(map);
+    var osm=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19, attribution:'© OpenStreetMap'}).addTo(map);
+    // MAP2 — couche imagerie aérienne (Esri), basculable. ⚠ vérifier les CGU pour un usage commercial.
+    var sat=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19, attribution:'Imagerie © Esri, Maxar, Earthstar Geographics'});
+    L.control.layers({'Plan':osm, 'Satellite':sat}, null, {position:'topright'}).addTo(map);
     tourMap=map;
     var pts=[];
     if(T.baseLatLng){
