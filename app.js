@@ -3093,6 +3093,22 @@
       '<div class="ar-bottom"><button class="ar-btn ghost" id="arpOcc" style="display:none" aria-pressed="true">⛰ Occlusion</button><button class="ar-btn ghost" id="arpUndo">↶ Retirer</button><button class="ar-btn ghost" id="arpClear">Tout effacer</button><button class="ar-btn danger" id="arpQuit">✕ Quitter</button></div>';
     return o;
   }
+  // AR4 — modèles glTF par type (si fournis dans ./models/). Repli garanti sur les primitives.
+  var AR_MODELS={ mural:'models/unit-mural.glb', cassette:'models/unit-cassette.glb', console:'models/unit-console.glb', outdoor:'models/unit-outdoor.glb' };
+  var arModelCache={};
+  function preloadARModels(){
+    if(typeof THREE==='undefined' || !THREE.GLTFLoader) return;
+    var loader; try{ loader=new THREE.GLTFLoader(); }catch(e){ return; }
+    Object.keys(AR_MODELS).forEach(function(type){
+      if(arModelCache[type]!==undefined) return; arModelCache[type]=null;
+      try{ loader.load(AR_MODELS[type], function(g){ if(g&&g.scene) arModelCache[type]=g.scene; }, undefined, function(){ arModelCache[type]=null; }); }catch(e){ arModelCache[type]=null; }
+    });
+  }
+  function makeUnitFor(type){
+    var m=arModelCache[type];
+    if(m){ try{ var g=new THREE.Group(); g.add(m.clone(true)); return g; }catch(e){} }
+    return makeUnit(type); // repli primitive si modèle absent / non chargé
+  }
   // Convention commune : face de montage à z=0, extrusion vers +Z. La pose aligne +Z sur la normale
   // de la surface visée → mur (dos au mur), plafond (cassette débordant vers le bas), sol (posé).
   function makeUnit(type){
@@ -3157,6 +3173,7 @@
       reticle.matrixAutoUpdate=false; reticle.visible=false; scene.add(reticle);
     }catch(e){ cleanup(); alert('Initialisation 3D impossible : '+(e&&e.message||e)); return; }
     setType(currentType);
+    preloadARModels(); // AR4 : tente de charger les .glb (repli primitives sinon)
 
     function updateStats(){
       if(!stats) return;
@@ -3182,7 +3199,7 @@
       var right=new THREE.Vector3().crossVectors(localUp, normal).normalize();
       var basis=new THREE.Matrix4().makeBasis(right, localUp, normal);
       var quat=new THREE.Quaternion().setFromRotationMatrix(basis);
-      var unit=makeUnit(currentType); unit.position.copy(pos); unit.quaternion.copy(quat);
+      var unit=makeUnitFor(currentType); unit.position.copy(pos); unit.quaternion.copy(quat);
       scene.add(unit); placed.push(unit); updateStats();
       // AR3 — ancrage : fixe l'unité dans le monde réel (moins de dérive quand on bouge)
       var f=ev&&ev.frame;
