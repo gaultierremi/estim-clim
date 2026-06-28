@@ -496,6 +496,15 @@
     state.tour.activeStopId=s.id;
     state.ui.tab='devis'; save(); render();
   }
+  function gmapsDest(s){ return s.latLng ? (s.latLng.lat+','+s.latLng.lng) : encodeURIComponent(s.addr||''); }
+  function navStop(s){ var d=gmapsDest(s); if(!d){ alert('Pas d’adresse ni de position pour cet arrêt.'); return; } window.open('https://www.google.com/maps/dir/?api=1&destination='+d+'&travelmode=driving&dir_action=navigate','_blank'); }
+  function navWholeTour(){
+    var seq=orderedStops(); if(!seq.length){ alert('Optimise l’itinéraire d’abord (arrêts géocodés requis).'); return; }
+    var dest=gmapsDest(seq[seq.length-1]);
+    var mids=seq.slice(0,-1).slice(0,9).map(gmapsDest); // Google Maps limite à ~9 étapes intermédiaires
+    var url='https://www.google.com/maps/dir/?api=1&destination='+dest+'&travelmode=driving&dir_action=navigate'+(mids.length?'&waypoints='+mids.join('%7C'):'');
+    window.open(url,'_blank');
+  }
   function buildContactRow(s, row){
     var slot=stopSlotText(row); var msg=ensureTourMsg();
     var body=tourMsgFill(msg.body, s, slot), subj=tourMsgFill(msg.subject, s, slot);
@@ -509,6 +518,7 @@
     var sel=el('select',{class:'itin-status status-'+(s.status||'').replace(/\s/g,'-')}); TOUR_STATUS.forEach(function(o){ sel.appendChild(opt(o[0],o[1],s.status===o[0])); });
     sel.addEventListener('change',function(){ s.status=sel.value; save(); refreshItin(); });
     wrap.appendChild(sel);
+    if(s.latLng || s.addr){ var nv=el('a',{class:'cbtn',title:'Naviguer (Google Maps)',href:'https://www.google.com/maps/dir/?api=1&destination='+gmapsDest(s)+'&travelmode=driving&dir_action=navigate',target:'_blank',rel:'noopener'},['🧭']); wrap.appendChild(nv); }
     var dv=el('button',{class:'cbtn',title:'Faire le devis (pré-rempli)'},[s.devisId?'📋 ✓':'📋 Devis']);
     dv.addEventListener('click',function(){ startDevisForStop(s); });
     wrap.appendChild(dv);
@@ -659,6 +669,8 @@
       irow.appendChild(optB);
       var frB=el('button',{class:'btn subtle sm'},['🖨 Feuille de route (PDF)']); frB.addEventListener('click',function(){ buildFeuilleRoute(); window.print(); });
       irow.appendChild(frB);
+      var navB=el('button',{class:'btn subtle sm'},['🧭 Naviguer toute la tournée']); navB.addEventListener('click', navWholeTour);
+      irow.appendChild(navB);
       irow.appendChild(numField('Vitesse moyenne (km/h)', T.avgKmh, '5', function(v){ T.avgKmh=Math.max(5,+v||50); if(!T.routeGeo) computeLegsHaversine(); save(); refreshItin(); }));
       irow.appendChild(iStatus);
       ip.appendChild(irow);
