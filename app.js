@@ -3165,7 +3165,7 @@
       var hint = AR_TARGET_HINT[currentType]||''; var s2 = hint? (hint+' · '+s) : s;
       if(s2!==lastStats){ stats.textContent=s2; lastStats=s2; }
     }
-    function placeUnit(){
+    function placeUnit(ev){
       if(!reticle.visible) return;
       var m=reticle.matrix;
       var pos=new THREE.Vector3().setFromMatrixPosition(m);
@@ -3184,12 +3184,17 @@
       var quat=new THREE.Quaternion().setFromRotationMatrix(basis);
       var unit=makeUnit(currentType); unit.position.copy(pos); unit.quaternion.copy(quat);
       scene.add(unit); placed.push(unit); updateStats();
+      // AR3 — ancrage : fixe l'unité dans le monde réel (moins de dérive quand on bouge)
+      var f=ev&&ev.frame;
+      if(f && f.createAnchor && typeof XRRigidTransform!=='undefined'){
+        try{ f.createAnchor(new XRRigidTransform({x:pos.x,y:pos.y,z:pos.z},{x:quat.x,y:quat.y,z:quat.z,w:quat.w}), refSpace).then(function(a){ unit._anchor=a; }).catch(function(){}); }catch(e){}
+      }
     }
     function undo(){ var u=placed.pop(); if(u) scene.remove(u); updateStats(); }
     function clearAll(){ placed.forEach(function(u){ scene.remove(u); }); placed=[]; updateStats(); }
 
     // Features optionnelles : la session démarre même si le casque/téléphone ne les supporte pas (repli propre).
-    var sessReq={ requiredFeatures:['hit-test'], optionalFeatures:['dom-overlay','depth-sensing','light-estimation'], domOverlay:{ root: overlay },
+    var sessReq={ requiredFeatures:['hit-test'], optionalFeatures:['dom-overlay','depth-sensing','light-estimation','anchors','plane-detection'], domOverlay:{ root: overlay },
       depthSensing:{ usagePreference:['cpu-optimized'], dataFormatPreference:['luminance-alpha','float32'] } };
     navigator.xr.requestSession('immersive-ar', sessReq)
       .catch(function(){ return navigator.xr.requestSession('immersive-ar', { requiredFeatures:['hit-test'], optionalFeatures:['dom-overlay'], domOverlay:{ root: overlay } }); })
@@ -3265,7 +3270,11 @@
         else reticle.visible=false;
         updateStats();
       }
-      if(frame){ applyLightEstimate(frame); applyOcclusion(frame); }
+      if(frame){
+        // AR3 — suit la pose de l'ancre pour chaque unité ancrée (corrige la dérive)
+        placed.forEach(function(u){ if(u._anchor && u._anchor.anchorSpace){ try{ var ap=frame.getPose(u._anchor.anchorSpace, refSpace); if(ap){ u.matrix.fromArray(ap.transform.matrix); u.matrix.decompose(u.position,u.quaternion,u.scale); } }catch(e){} } });
+        applyLightEstimate(frame); applyOcclusion(frame);
+      }
       try{ renderer.render(scene,camera); }catch(e){}
     }
     function cleanup(){
