@@ -792,6 +792,20 @@
     var murals=indoorMurals();
     return murals.filter(function(p){return (+p.kw||0)>=reco-0.05;})[0] || murals[0] || state.catalog[0] || null;
   }
+  var DEVIS_TEMPLATES=[
+    {name:'Studio — 1 split', rooms:[{name:'Pièce de vie', surface:30}]},
+    {name:'Appartement 1 ch. — 2 splits', rooms:[{name:'Séjour', surface:30},{name:'Chambre', surface:14}]},
+    {name:'Appartement 2 ch. — 3 splits', rooms:[{name:'Séjour', surface:32},{name:'Chambre 1', surface:14},{name:'Chambre 2', surface:12}]},
+    {name:'Maison 3 ch. — 4 splits', rooms:[{name:'Séjour', surface:40},{name:'Chambre 1', surface:14},{name:'Chambre 2', surface:12},{name:'Bureau', surface:10}]}
+  ];
+  function applyDevisTemplate(tpl){
+    var q=state.quote, hasWork=q.client.name || q.rooms.length>1 || (q.rooms[0]&&q.rooms[0].productId) || q.extraLines.length;
+    if(hasWork && !confirm('Appliquer le modèle « '+tpl.name+' » ? Le devis courant non enregistré sera remplacé.')) return;
+    var nq=newQuote();
+    nq.rooms=tpl.rooms.map(function(r){ var nr=newRoom(r.name); nr.surface=r.surface; return nr; });
+    nq.rooms.forEach(autoSelectProduct);
+    state.quote=nq; state.ui.tab='devis'; save(); render();
+  }
   function autoSelectProduct(r){
     var pick=suggestIndoor(computeRoom(r).reco);
     r.productId = pick? pick.id : null;
@@ -970,6 +984,11 @@
     var newBtn=el('button',{class:'btn subtle sm',style:'margin-top:10px'},['＋ Nouveau devis vierge']);
     newBtn.addEventListener('click',function(){ if(!confirm('Démarrer un nouveau devis ? (le courant sera remplacé)')) return; state.quote=newQuote(); state.quote.rooms.forEach(autoSelectProduct); save(); render(); });
     p.appendChild(newBtn);
+    var tplSel=el('select',{style:'margin-top:10px; max-width:340px'});
+    tplSel.appendChild(opt('','📐 Appliquer un modèle…', true));
+    DEVIS_TEMPLATES.forEach(function(tp,i){ tplSel.appendChild(opt(String(i), tp.name)); });
+    tplSel.addEventListener('change',function(){ if(tplSel.value==='') return; applyDevisTemplate(DEVIS_TEMPLATES[+tplSel.value]); });
+    p.appendChild(tplSel);
 
     if(state.savedQuotes.length){
       var list=el('div',{style:'margin-top:14px'});
