@@ -42,7 +42,7 @@
       primes:{ base:600, mult:{R1:6,R2:4,R3:2,R4:1.5}, capPct:{R1:70,R2:70,R3:50,R4:50}, minAgeYears:15, requiresAudit:true },
       finance:{ acomptePct:30, paymentTerms:'Acompte à la commande, solde à la fin des travaux. Devis valable selon la durée indiquée, sous réserve de visite technique.', cgv:'', simRate:0, simMonths:0 },
       savings:{ fossilPrice:0.11, fossilEff:0.9, pacPrice:0.30, scop:3.8 },
-      settings:{ vat:6, quoteCounter:1 },
+      settings:{ vat:6, quoteCounter:1, marginMinPct:20 },
       quote: newQuote(),
       plan: newPlan(),
       savedQuotes:[],
@@ -232,6 +232,14 @@
     var cap=t.tvac*((+(P.capPct[q.incomeCat])||0)/100);
     var amount=Math.max(0, Math.min(base, cap));
     return {eligible:true, amount:amount, base:base, cap:cap, reason:'Prime Habitation estimée (PAC air-eau, cat. '+q.incomeCat+'). Audit logement requis avant travaux, logement de plus de '+P.minAgeYears+' ans. Montant à confirmer sur logement.wallonie.be.'};
+  }
+  // Garde-fou de marge (aide, pas une vérité comptable) — basé sur les prix d'achat saisis.
+  function computeMargin(){
+    var q=state.quote, t=computeTotals(), cost=0;
+    q.rooms.forEach(function(r){ var p=getProduct(r.productId); if(p) cost+=(+p.purchasePrice||0); });
+    var ao=activeOutdoor(); if(ao.unit) cost+=(+ao.unit.purchasePrice||0);
+    var revenue=t.htva, margin=revenue-cost, pct=revenue>0?(margin/revenue*100):0, min=+state.settings.marginMinPct||0;
+    return {cost:cost, revenue:revenue, margin:margin, pct:pct, min:min, hasCost:cost>0, low:(cost>0 && pct<min)};
   }
   // Mensualité d'amortissement standard (simulation indicative — pas une offre de crédit)
   function computePMT(principal, annualPct, months){
@@ -963,7 +971,9 @@
       '<div class="sum-line"><span>TVA</span><span class="v num" id="s_vat">—</span></div>'+
       '<div class="sum-div" id="s_primeDiv" style="display:none"></div>'+
       '<div class="sum-line" id="s_primeLine" style="display:none"><span style="color:var(--good)">Prime estimée (Région)</span><span class="v num" id="s_prime" style="color:var(--good)">—</span></div>'+
-      '<div class="sum-line" id="s_resteLine" style="display:none"><span><b>Reste à charge estimé</b></span><span class="v num" id="s_reste" style="font-weight:800">—</span></div>';
+      '<div class="sum-line" id="s_resteLine" style="display:none"><span><b>Reste à charge estimé</b></span><span class="v num" id="s_reste" style="font-weight:800">—</span></div>'+
+      '<div class="sum-line sub no-print" id="s_marginLine" style="display:none"><span>Marge estimée</span><span class="v num" id="s_margin">—</span></div>'+
+      '<div class="no-print" id="s_marginWarn" style="display:none; margin:0 18px 10px; font-size:11.5px; color:var(--danger); font-weight:600"></div>';
     return c;
   }
   function buildReminders(){
@@ -1045,6 +1055,10 @@
     var ph=document.getElementById('projetHint'); if(ph){ ph.textContent=pr.reason; ph.style.color = pr.eligible? 'var(--good)':'var(--muted)'; }
     var rl=document.getElementById('s_remiseLine');
     if(rl){ if(t.remise>0){ rl.style.display='flex'; set('s_remise','− '+euro.format(t.remise)); } else rl.style.display='none'; }
+    // garde-fou de marge (interne, basé sur les prix d'achat saisis)
+    var mg=computeMargin(), ml=document.getElementById('s_marginLine'), mw=document.getElementById('s_marginWarn');
+    if(ml){ if(mg.hasCost){ ml.style.display='flex'; set('s_margin', euro.format(mg.margin)+' ('+techRound1(mg.pct)+' %)'); var mn=document.getElementById('s_margin'); if(mn) mn.style.color=mg.low?'var(--danger)':'var(--ink)'; } else ml.style.display='none'; }
+    if(mw){ if(mg.low){ mw.style.display='block'; mw.textContent='⚠ Marge '+techRound1(mg.pct)+' % sous le seuil de '+techRound1(mg.min)+' % (prix d’achat saisis). Vérifie la remise.'; } else mw.style.display='none'; }
     // vat seg
     document.querySelectorAll('#vatSeg button').forEach(function(b){ b.setAttribute('aria-pressed', (+b.getAttribute('data-vat'))===state.settings.vat); });
     var note=document.getElementById('vatNote');
@@ -1204,10 +1218,12 @@
     ['Liaison incluse (m)','liaisonBaseLen','number','',0.5],['Liaison max (m)','liaisonMaxLen','number','',0.5],
     ['Dénivelé max (m)','denivMax','number','',0.5],['Charge add. (g/m)','chargeGM','number','',1],
     ['Disjoncteur conseillé (note)','disjoncteur','text','ex. 16 A — à confirmer'],['Section goulotte conseillée','goulotteSectionConseillee','text','60x45'],
-    ['Fiche technique (URL ou réf.)','datasheet','text','https://… ou référence PDF']
+    ['Fiche technique (URL ou réf.)','datasheet','text','https://… ou référence PDF'],
+    ['Prix d’achat HTVA (€)','purchasePrice','number','',10]
   ];
   var OUTDOOR_TECH_FIELDS=[
-    ['Dénivelé max (m)','denivMax','number','',0.5],['Disjoncteur conseillé (note)','disjoncteur','text','ex. 16 A — à confirmer']
+    ['Dénivelé max (m)','denivMax','number','',0.5],['Disjoncteur conseillé (note)','disjoncteur','text','ex. 16 A — à confirmer'],
+    ['Prix d’achat HTVA (€)','purchasePrice','number','',10]
   ];
   // Champs techniques par modèle : tous optionnels, livrés vides. L'app les applique au relevé
   // quand ils existent, sinon « à confirmer ». Aucune valeur de sécurité par défaut.
@@ -1365,6 +1381,11 @@
     gs.appendChild(numField('Taux annuel (%)', state.finance.simRate,'0.1', function(v){state.finance.simRate=Math.max(0,+v||0); save();}));
     gs.appendChild(numField('Durée (mois, 0 = off)', state.finance.simMonths,'1', function(v){state.finance.simMonths=Math.max(0,Math.round(+v||0)); save();}));
     p2.appendChild(gs);
+    p2.appendChild(el('div',{class:'total-label',style:'margin-top:16px'},['Garde-fou de marge']));
+    p2.appendChild(el('p',{class:'section-sub'},['Alerte interne (jamais affichée au client) si la marge passe sous le seuil. Basée sur les prix d’achat saisis au catalogue — aide, pas une vérité comptable.']));
+    var gm=el('div',{class:'grid g2',style:'margin-top:8px'});
+    gm.appendChild(numField('Marge minimum (%)', state.settings.marginMinPct,'1', function(v){state.settings.marginMinPct=Math.max(0,+v||0); save();}));
+    p2.appendChild(gm);
     var pt=el('textarea'); pt.value=state.finance.paymentTerms; pt.addEventListener('input',function(){state.finance.paymentTerms=pt.value; save();});
     p2.appendChild(el('label',{class:'field',style:'margin-top:12px'},[el('span',null,['Conditions de paiement (PDF)']), pt]));
     var cgv=el('textarea',{style:'min-height:90px'}); cgv.value=state.finance.cgv; cgv.addEventListener('input',function(){state.finance.cgv=cgv.value; save();});
