@@ -93,6 +93,8 @@
     outdoor: {label:'Groupe ext.', w:86,  h:56, fill:'#fbf0e0', stroke:'#c9760f', cat:'outdoor'}
   };
   var planCanvasWrap, planSideHost;
+  var techDraft=[];      // points de la goulotte en cours de tracé (transient, non persisté)
+  var lastTrouDiam=60;   // dernier Ø de trou utilisé (mm)
 
   var TYPES = [['mural','Murale'],['console','Console'],['cassette','Cassette plafond'],['gainable','Gainable']];
   var typeLabel = function(t){ var m={mural:'Murale',console:'Console',cassette:'Cassette',gainable:'Gainable'}; return m[t]||t; };
@@ -1001,13 +1003,16 @@
     t.appendChild(el('span',{class:'sep'}));
     Object.keys(PLAN_ITEMS).forEach(function(type){ var m=PLAN_ITEMS[type]; var b=el('button',{class:'planbtn eq'},['＋ '+m.label]); b.addEventListener('click',function(){ addItem(type); }); t.appendChild(b); });
     t.appendChild(el('span',{class:'sep'}));
+    var bGoul=el('button',{class:'planbtn'},['🧵 Goulotte (tech)']); bGoul.setAttribute('aria-pressed', state.planMode==='goulotte'); bGoul.addEventListener('click',function(){ state.planMode='goulotte'; techDraft=[]; state.ui.planSel=null; render(); }); t.appendChild(bGoul);
+    var bTrou=el('button',{class:'planbtn'},['⊙ Trou (tech)']); bTrou.setAttribute('aria-pressed', state.planMode==='trou'); bTrou.addEventListener('click',function(){ state.planMode='trou'; techDraft=[]; state.ui.planSel=null; render(); }); t.appendChild(bTrou);
+    t.appendChild(el('span',{class:'sep'}));
     t.appendChild(el('span',{style:'font-size:12px;color:var(--muted)'},['Plan']));
     var wIn=el('input',{type:'number',min:'2',step:'1',class:'psize'}); wIn.value=(state.plan.wcm/100); wIn.addEventListener('change',function(){ state.plan.wcm=Math.max(200,Math.round((+wIn.value||10)*100)); save(); render(); });
     var hIn=el('input',{type:'number',min:'2',step:'1',class:'psize'}); hIn.value=(state.plan.hcm/100); hIn.addEventListener('change',function(){ state.plan.hcm=Math.max(200,Math.round((+hIn.value||7)*100)); save(); render(); });
     t.appendChild(wIn); t.appendChild(el('span',{style:'font-size:12px;color:var(--muted)'},['×'])); t.appendChild(hIn); t.appendChild(el('span',{style:'font-size:12px;color:var(--muted)'},['m']));
     t.appendChild(el('span',{class:'sep'}));
     var fromB=el('button',{class:'planbtn'},['⟳ Reprendre les pièces du devis']); fromB.addEventListener('click', fromDevis); t.appendChild(fromB);
-    var clrB=el('button',{class:'planbtn'},['🗑 Vider']); clrB.addEventListener('click',function(){ if(!confirm('Vider le plan ?')) return; state.plan.rooms=[]; state.plan.items=[]; state.ui.planSel=null; save(); render(); }); t.appendChild(clrB);
+    var clrB=el('button',{class:'planbtn'},['🗑 Vider']); clrB.addEventListener('click',function(){ if(!confirm('Vider le plan ?')) return; state.plan.rooms=[]; state.plan.items=[]; state.plan.tech=newPlanTech(); techDraft=[]; state.ui.planSel=null; save(); render(); }); t.appendChild(clrB);
     t.appendChild(el('span',{class:'sep'}));
     var arB=el('button',{class:'planbtn'},['📐 Mesurer en AR']); arB.addEventListener('click', startARMeasure); t.appendChild(arB);
     var arViz=el('button',{class:'planbtn'},['🛋 Voir la clim sur le mur (AR)']); arViz.addEventListener('click', startARPlace); t.appendChild(arViz);
@@ -1026,12 +1031,70 @@
     svg.appendChild(svgN('rect',{x:1,y:1,width:P.wcm-2,height:P.hcm-2,fill:'none',stroke:'#dce5e8','stroke-width':2}));
     P.rooms.forEach(function(r){ svg.appendChild(buildRoomNode(r)); });
     P.items.forEach(function(it){ svg.appendChild(buildItemNode(it)); });
+    buildTechEditorNodes(svg);
     attachBgHandler(svg,bg);
     return svg;
   }
 
+  function goulotteLenM(points){ var L=0; for(var i=1;i<points.length;i++){ var dx=points[i].x-points[i-1].x, dy=points[i].y-points[i-1].y; L+=Math.sqrt(dx*dx+dy*dy); } return L/100; }
+  function ptsAttr(points){ return points.map(function(p){return p.x+','+p.y;}).join(' '); }
+  function buildTechEditorNodes(svg){
+    ensurePlanTech(state.plan); var T=state.plan.tech;
+    T.goulottes.forEach(function(g){
+      var sel=isSel('goulotte',g.id);
+      var pl=svgN('polyline',{points:ptsAttr(g.points), fill:'none', stroke:sel?'#0f1b24':'#c9760f', 'stroke-width':sel?5:4, 'stroke-dasharray':'10 6', 'stroke-linejoin':'round', 'stroke-linecap':'round', style:'cursor:pointer'});
+      pl.addEventListener('pointerdown',function(ev){ if(state.planMode!=='select') return; ev.stopPropagation(); state.ui.planSel={kind:'goulotte',id:g.id}; renderSide(); renderPlanCanvas(); });
+      svg.appendChild(pl);
+    });
+    T.trous.forEach(function(h){
+      var sel=isSel('trou',h.id);
+      var grp=svgN('g',{style:'cursor:pointer'});
+      var r=Math.max(8, (+h.d||60)/4);
+      grp.appendChild(svgN('circle',{cx:h.x, cy:h.y, r:r, fill:'rgba(191,70,49,.18)', stroke:sel?'#0f1b24':'#bf4631','stroke-width':sel?3:2}));
+      grp.appendChild(svgN('line',{x1:h.x-r,y1:h.y,x2:h.x+r,y2:h.y, stroke:'#bf4631','stroke-width':1.5}));
+      grp.appendChild(svgN('line',{x1:h.x,y1:h.y-r,x2:h.x,y2:h.y+r, stroke:'#bf4631','stroke-width':1.5}));
+      var tx=svgN('text',{x:h.x+r+3,y:h.y+4,'font-size':12,fill:'#bf4631','font-weight':700}); tx.textContent='Ø'+(+h.d||60); grp.appendChild(tx);
+      grp.addEventListener('pointerdown',function(ev){ if(state.planMode!=='select') return; ev.stopPropagation(); state.ui.planSel={kind:'trou',id:h.id}; renderSide(); renderPlanCanvas(); });
+      svg.appendChild(grp);
+    });
+    if(state.planMode==='goulotte' && techDraft.length){
+      svg.appendChild(svgN('polyline',{points:ptsAttr(techDraft), fill:'none', stroke:'#c9760f','stroke-width':4,'stroke-dasharray':'4 5','stroke-linejoin':'round','stroke-linecap':'round'}));
+      techDraft.forEach(function(p){ svg.appendChild(svgN('circle',{cx:p.x,cy:p.y,r:5,fill:'#c9760f'})); });
+    }
+  }
+  function finishGoulotte(){
+    if(techDraft.length<2){ alert('Place au moins 2 points pour tracer une goulotte (clique sur le plan).'); return; }
+    ensurePlanTech(state.plan);
+    var g={id:UID(), points:techDraft.slice(), m:Math.round(goulotteLenM(techDraft)*100)/100, roomId:null};
+    state.plan.tech.goulottes.push(g);
+    techDraft=[]; state.planMode='select'; state.ui.planSel={kind:'goulotte',id:g.id}; save(); render();
+  }
+  function assignGoulotteToRoom(g, roomId){
+    if(roomId){
+      var r=state.quote.rooms.filter(function(x){return x.id===roomId;})[0];
+      if(r){ ensureRoomTech(r);
+        if((+r.tech.goulotteLen||0)>0 && Math.abs((+r.tech.goulotteLen)-g.m)>0.01 && !confirm('La goulotte de « '+r.name+' » est déjà à '+techRound1(r.tech.goulotteLen)+' m. La remplacer par '+techRound1(g.m)+' m (depuis le plan) ?')) return false;
+        r.tech.goulotteLen=g.m; r.tech.goulotteSrc='plan';
+      }
+    }
+    g.roomId=roomId||null; save(); return true;
+  }
+
   function attachBgHandler(svg,bg){
     bg.addEventListener('pointerdown',function(ev){
+      if(state.planMode==='goulotte' || state.planMode==='trou'){
+        ev.stopPropagation();
+        var start=svgPoint(svg,ev);
+        try{ bg.setPointerCapture(ev.pointerId); }catch(e){}
+        function up(e){ try{bg.releasePointerCapture(ev.pointerId);}catch(e2){} bg.removeEventListener('pointerup',up);
+          var p=svgPoint(svg,e); if(Math.abs(p.x-start.x)+Math.abs(p.y-start.y)>15) return; // glissé → ignorer
+          var x=snap(p.x), y=snap(p.y);
+          if(state.planMode==='trou'){ ensurePlanTech(state.plan); state.plan.tech.trous.push({id:UID(), x:x, y:y, d:lastTrouDiam}); save(); renderPlanCanvas(); renderSide(); }
+          else { techDraft.push({x:x,y:y}); renderPlanCanvas(); renderSide(); }
+        }
+        bg.addEventListener('pointerup',up);
+        return;
+      }
       if(state.planMode==='drawroom'){
         ev.stopPropagation();
         var start=svgPoint(svg,ev);
@@ -1115,7 +1178,50 @@
   function buildPlanSide(){
     var sel=state.ui.planSel;
     var c=el('div',{class:'card'}); var p=el('div',{class:'pad'});
+    if(state.planMode==='goulotte'){
+      p.appendChild(el('div',{class:'eyebrow'},['Technique']));
+      p.appendChild(el('h2',{class:'section-title',style:'margin-bottom:6px'},['Tracé de goulotte']));
+      p.appendChild(el('p',{class:'section-sub'},['Clique sur le plan pour ajouter des points (de l’unité vers le mur / groupe ext.). Longueur : '+techRound1(goulotteLenM(techDraft))+' m · '+techDraft.length+' point(s).']));
+      var grow=el('div',{style:'display:flex;gap:8px;flex-wrap:wrap;margin-top:10px'});
+      var fin=el('button',{class:'btn primary sm'},['✓ Terminer la goulotte']); fin.addEventListener('click', finishGoulotte);
+      var und=el('button',{class:'btn subtle sm'},['↶ Retirer le point']); und.addEventListener('click',function(){ techDraft.pop(); renderPlanCanvas(); renderSide(); });
+      var can=el('button',{class:'btn subtle sm'},['✕ Annuler']); can.addEventListener('click',function(){ techDraft=[]; state.planMode='select'; render(); });
+      grow.appendChild(fin); grow.appendChild(und); grow.appendChild(can); p.appendChild(grow);
+      c.appendChild(p); return c;
+    }
+    if(state.planMode==='trou'){
+      p.appendChild(el('div',{class:'eyebrow'},['Technique']));
+      p.appendChild(el('h2',{class:'section-title',style:'margin-bottom:6px'},['Trou de carottage']));
+      p.appendChild(el('p',{class:'section-sub'},['Clique sur le plan pour poser un trou.']));
+      p.appendChild(numField('Ø par défaut (mm)', lastTrouDiam, '1', function(v){ lastTrouDiam=Math.max(1,Math.round(+v||60)); }));
+      p.appendChild(drillWarning());
+      var doneB=el('button',{class:'btn subtle sm',style:'margin-top:10px'},['Terminer']); doneB.addEventListener('click',function(){ state.planMode='select'; render(); }); p.appendChild(doneB);
+      c.appendChild(p); return c;
+    }
     if(!sel){ p.appendChild(el('div',{class:'eyebrow'},['Édition'])); p.appendChild(el('h2',{class:'section-title',style:'margin-bottom:6px'},['Aucune sélection'])); p.appendChild(el('p',{class:'section-sub'},['Dessine une pièce, ajoute des éléments depuis la barre, puis clique un élément pour le régler ou le déplacer.'])); c.appendChild(p); return c; }
+    if(sel.kind==='trou'){
+      var hole=(state.plan.tech&&state.plan.tech.trous||[]).filter(function(x){return x.id===sel.id;})[0];
+      if(!hole){ state.ui.planSel=null; return buildPlanSide(); }
+      p.appendChild(el('div',{class:'eyebrow'},['Technique']));
+      p.appendChild(el('h2',{class:'section-title',style:'margin-bottom:8px'},['Trou de carottage']));
+      p.appendChild(numField('Ø (mm)', hole.d, '1', function(v){ hole.d=Math.max(1,Math.round(+v||60)); lastTrouDiam=hole.d; renderPlanCanvas(); save(); }));
+      p.appendChild(drillWarning());
+      var delH=el('button',{class:'btn danger sm',style:'margin-top:12px'},['Supprimer le trou']); delH.addEventListener('click',function(){ state.plan.tech.trous=state.plan.tech.trous.filter(function(x){return x.id!==hole.id;}); state.ui.planSel=null; save(); render(); }); p.appendChild(delH);
+      c.appendChild(p); return c;
+    }
+    if(sel.kind==='goulotte'){
+      var goul=(state.plan.tech&&state.plan.tech.goulottes||[]).filter(function(x){return x.id===sel.id;})[0];
+      if(!goul){ state.ui.planSel=null; return buildPlanSide(); }
+      p.appendChild(el('div',{class:'eyebrow'},['Technique']));
+      p.appendChild(el('h2',{class:'section-title',style:'margin-bottom:8px'},['Goulotte — '+techRound1(goul.m)+' m']));
+      var asel=el('select'); asel.appendChild(opt('','— Affecter à une unité… —', !goul.roomId));
+      state.quote.rooms.forEach(function(r){ asel.appendChild(opt(r.id, r.name+(r.tech&&+r.tech.goulotteLen?(' ('+techRound1(r.tech.goulotteLen)+' m)'):''), goul.roomId===r.id)); });
+      asel.addEventListener('change',function(){ if(!assignGoulotteToRoom(goul, asel.value||null)) asel.value=goul.roomId||''; renderSide(); });
+      p.appendChild(el('label',{class:'field'},[el('span',null,['Reporter la longueur dans le relevé de l’unité']), asel]));
+      p.appendChild(el('p',{class:'section-sub',style:'font-size:12px'},['La longueur est reportée dans tech.goulotteLen de l’unité choisie (marquée « depuis le plan »).']));
+      var delG=el('button',{class:'btn danger sm',style:'margin-top:12px'},['Supprimer la goulotte']); delG.addEventListener('click',function(){ state.plan.tech.goulottes=state.plan.tech.goulottes.filter(function(x){return x.id!==goul.id;}); state.ui.planSel=null; save(); render(); }); p.appendChild(delG);
+      c.appendChild(p); return c;
+    }
     if(sel.kind==='room'){
       var room=state.plan.rooms.filter(function(r){return r.id===sel.id;})[0];
       if(!room){ state.ui.planSel=null; return buildPlanSide(); }
@@ -1166,6 +1272,20 @@
       if(prod) s+='<text x="'+cx+'" y="'+(cy+12)+'" text-anchor="middle" font-size="10" fill="#5e727c">'+escapeHtml((prod.brand||'')+' '+fmtKw(prod.kw))+'</text>';
       s+='</g>';
     });
+    if(opt.technical && P.tech){
+      (P.tech.goulottes||[]).forEach(function(g){
+        if(!g.points||!g.points.length) return;
+        s+='<polyline points="'+ptsAttr(g.points)+'" fill="none" stroke="#c9760f" stroke-width="4" stroke-dasharray="10 6" stroke-linejoin="round" stroke-linecap="round"/>';
+        var mid=g.points[Math.floor(g.points.length/2)];
+        s+='<text x="'+mid.x+'" y="'+(mid.y-6)+'" font-size="13" fill="#c9760f" font-weight="700">'+techRound1(g.m)+' m</text>';
+      });
+      (P.tech.trous||[]).forEach(function(h){
+        var r=Math.max(8,(+h.d||60)/4);
+        s+='<circle cx="'+h.x+'" cy="'+h.y+'" r="'+r+'" fill="rgba(191,70,49,.18)" stroke="#bf4631" stroke-width="2"/>';
+        s+='<line x1="'+(h.x-r)+'" y1="'+h.y+'" x2="'+(h.x+r)+'" y2="'+h.y+'" stroke="#bf4631" stroke-width="1.5"/><line x1="'+h.x+'" y1="'+(h.y-r)+'" x2="'+h.x+'" y2="'+(h.y+r)+'" stroke="#bf4631" stroke-width="1.5"/>';
+        s+='<text x="'+(h.x+r+3)+'" y="'+(h.y+4)+'" font-size="12" fill="#bf4631" font-weight="700">Ø'+(+h.d||60)+'</text>';
+      });
+    }
     s+='</svg>'; return s;
   }
   function planHasContent(){ return state.plan && (state.plan.rooms.length||state.plan.items.length); }
